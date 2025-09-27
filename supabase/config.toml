@@ -1,0 +1,13 @@
+project_id = "ccfuumvfuvnjlenvtvwn"
+
+[functions.generate-image]
+verify_jwt = true
+
+[functions.manage-images]  
+verify_jwt = true
+
+[functions.manage-collections]
+verify_jwt = true
+
+[functions.save-generated-image]
+verify_jwt = true
