@@ -3,25 +3,32 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
-  MessageSquare,
-  Send,
+  MessageCircle,
+  SendHorizontal,
   Bot,
   User as UserIcon,
   Loader2,
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { chatbotService, ChatMessage, AvatarContext } from '@/services/chatbotService';
 import { useAuth } from '@/hooks/useAuth';
 import { apiKeyService } from '@/services/apiKeyService';
+import { TrainingService, PromptVersion } from '@/services/trainingService';
+import { SmartPromptService } from '@/services/smartPromptService';
 
 interface Message {
   id: string;
   type: 'user' | 'avatar';
   content: string;
   timestamp: Date;
+  feedback?: 'good' | 'bad' | null;
+  userMessage?: string; // Store corresponding user message for avatar responses
 }
 
 interface TestChatSimpleProps {
@@ -36,6 +43,8 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
   const [isTyping, setIsTyping] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  const [availableVersions, setAvailableVersions] = useState<PromptVersion[]>([]);
+  const [selectedVersionId, setSelectedVersionId] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -63,15 +72,38 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
     checkApiKeyStatus();
   }, [user]);
 
-  // Initialize with welcome message when avatar changes
+  // Load available versions when avatar changes
+  useEffect(() => {
+    const loadVersions = async () => {
+      if (!user || !selectedAvatar) return;
+
+      try {
+        const versions = await TrainingService.getPromptVersions(selectedAvatar.id, user.id);
+        setAvailableVersions(versions);
+
+        // Set default to active version or first available
+        const activeVersion = await TrainingService.getActivePromptVersion(selectedAvatar.id, user.id);
+        if (activeVersion) {
+          setSelectedVersionId(activeVersion.id!);
+        } else if (versions.length > 0) {
+          setSelectedVersionId(versions[0].id!);
+        } else {
+          setSelectedVersionId('');
+        }
+      } catch (error) {
+        console.error('Error loading versions:', error);
+        setAvailableVersions([]);
+        setSelectedVersionId('');
+      }
+    };
+
+    loadVersions();
+  }, [user, selectedAvatar]);
+
+  // Initialize chat when avatar changes
   useEffect(() => {
     if (selectedAvatar) {
-      setMessages([{
-        id: '1',
-        type: 'avatar',
-        content: `Hello! I'm ${selectedAvatar.name}. I'm ready to chat with you using my latest training. How can I help you today?`,
-        timestamp: new Date()
-      }]);
+      setMessages([]);
       setConversationHistory([]);
       setApiError(null);
     }
@@ -98,6 +130,15 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
     setMessages(prev => [...prev, userMessage]);
 
     try {
+      // Get the selected version's system prompt if available
+      let customSystemPrompt: string | undefined;
+      if (selectedVersionId && availableVersions.length > 0) {
+        const selectedVersion = availableVersions.find(v => v.id === selectedVersionId);
+        if (selectedVersion) {
+          customSystemPrompt = selectedVersion.system_prompt;
+        }
+      }
+
       // Create avatar context
       const avatarContext: AvatarContext = {
         id: selectedAvatar.id,
@@ -105,7 +146,8 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
         backstory: selectedAvatar.backstory,
         personality_traits: selectedAvatar.personality_traits,
         mbti_type: selectedAvatar.mbti_type,
-        hidden_rules: selectedAvatar.hidden_rules
+        hidden_rules: selectedAvatar.hidden_rules,
+        customSystemPrompt: customSystemPrompt
       };
 
       let response: string;
@@ -135,7 +177,9 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
         id: (Date.now() + 1).toString(),
         type: 'avatar',
         content: response,
-        timestamp: new Date()
+        timestamp: new Date(),
+        feedback: null,
+        userMessage: messageContent
       };
 
       setMessages(prev => [...prev, avatarMessage]);
@@ -174,14 +218,7 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
   };
 
   const clearChat = () => {
-    if (selectedAvatar) {
-      setMessages([{
-        id: '1',
-        type: 'avatar',
-        content: `Hello! I'm ${selectedAvatar.name}. I'm ready to chat with you using my latest training. How can I help you today?`,
-        timestamp: new Date()
-      }]);
-    }
+    setMessages([]);
     setConversationHistory([]);
     setApiError(null);
   };
@@ -190,11 +227,53 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const handleFeedback = async (messageId: string, feedback: 'good' | 'bad') => {
+    if (!user || !selectedAvatar) return;
+
+    // Find the message
+    const message = messages.find(m => m.id === messageId);
+    if (!message || message.type !== 'avatar') return;
+
+    try {
+      // Learn from the feedback
+      await SmartPromptService.learnFromConversations(
+        user.id,
+        selectedAvatar.id,
+        message.userMessage || '',
+        message.content,
+        feedback,
+        messageId
+      );
+
+      // Update UI
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === messageId ? { ...m, feedback } : m
+        )
+      );
+
+      toast({
+        title: feedback === 'good' ? "Thanks for the feedback!" : "Feedback noted",
+        description: feedback === 'good'
+          ? "I'll remember this response pattern"
+          : "I'll try to improve next time",
+      });
+
+    } catch (error) {
+      console.error('Error processing feedback:', error);
+      toast({
+        title: "Feedback Error",
+        description: "Failed to save feedback, but I'll still try to learn",
+        variant: "destructive"
+      });
+    }
+  };
+
   if (!selectedAvatar) {
     return (
       <Card>
         <CardContent className="flex flex-col items-center justify-center py-16">
-          <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
+          <MessageCircle className="h-12 w-12 text-muted-foreground mb-4" />
           <h3 className="text-lg font-semibold mb-2">No Avatar Selected</h3>
           <p className="text-muted-foreground">
             Select an avatar to start testing conversations
@@ -205,10 +284,10 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
   }
 
   return (
-    <div className="space-y-4">
+    <div className="h-[calc(100vh-200px)] flex flex-col space-y-4">
       {/* API Error */}
       {apiError && (
-        <div className="flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
+        <div className="flex-shrink-0 flex items-center gap-2 p-3 bg-destructive/10 border border-destructive/20 rounded-lg">
           <AlertTriangle className="h-4 w-4 text-destructive" />
           <span className="text-sm text-destructive">{apiError}</span>
           <Button
@@ -223,14 +302,34 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
       )}
 
       {/* Chat Interface */}
-      <Card className="h-[calc(100vh-280px)] flex flex-col">
-        <CardHeader className="flex-shrink-0">
+      <Card className="flex-1 flex flex-col overflow-hidden">
+        <CardHeader className="flex-shrink-0 pb-3">
           <CardTitle className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5" />
+              <MessageCircle className="h-5 w-5" />
               Chat with {selectedAvatar.name}
             </div>
             <div className="flex items-center gap-2">
+              {/* Version Selector */}
+              {availableVersions.length > 0 && (
+                <Select value={selectedVersionId} onValueChange={setSelectedVersionId}>
+                  <SelectTrigger className="w-32 h-8 text-xs">
+                    <SelectValue placeholder="Select version" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableVersions.map((version) => (
+                      <SelectItem key={version.id} value={version.id!}>
+                        <span className="font-medium">{version.version_number}</span>
+                        {version.version_name && (
+                          <span className="ml-1 text-muted-foreground">
+                            - {version.version_name}
+                          </span>
+                        )}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               <Badge variant="outline" className="text-xs">
                 GPT-4o Mini
               </Badge>
@@ -241,9 +340,9 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
           </CardTitle>
         </CardHeader>
 
-        <CardContent className="flex flex-col flex-1 p-0">
+        <CardContent className="flex flex-col flex-1 p-0 overflow-hidden">
           {/* Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
             {messages.map((message) => (
               <div
                 key={message.id}
@@ -273,10 +372,37 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
                   }`}>
                     <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                   </div>
-                  <div className={`text-xs text-muted-foreground ${
-                    message.type === 'user' ? 'text-right' : ''
+                  <div className={`flex items-center gap-2 text-xs text-muted-foreground ${
+                    message.type === 'user' ? 'justify-end' : 'justify-start'
                   }`}>
-                    {formatTime(message.timestamp)}
+                    <span>{formatTime(message.timestamp)}</span>
+                    {/* Feedback buttons for avatar messages */}
+                    {message.type === 'avatar' && (
+                      <div className="flex items-center gap-1 ml-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={`h-6 w-6 p-0 ${
+                            message.feedback === 'good' ? 'text-green-600' : 'text-muted-foreground'
+                          }`}
+                          onClick={() => handleFeedback(message.id, 'good')}
+                          disabled={message.feedback !== null}
+                        >
+                          <ThumbsUp className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={`h-6 w-6 p-0 ${
+                            message.feedback === 'bad' ? 'text-red-600' : 'text-muted-foreground'
+                          }`}
+                          onClick={() => handleFeedback(message.id, 'bad')}
+                          disabled={message.feedback !== null}
+                        >
+                          <ThumbsDown className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -302,7 +428,7 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
           </div>
 
           {/* Input Area */}
-          <div className="p-4 border-t bg-background">
+          <div className="flex-shrink-0 p-4 border-t bg-background">
             <div className="flex items-center gap-2">
               <Input
                 value={inputMessage}
@@ -320,7 +446,7 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
                 {isTyping ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Send className="h-4 w-4" />
+                  <SendHorizontal className="h-4 w-4" />
                 )}
               </Button>
               <Button

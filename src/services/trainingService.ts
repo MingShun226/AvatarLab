@@ -288,6 +288,22 @@ export class TrainingService {
     if (error) throw new Error(`Failed to activate prompt version: ${error.message}`);
   }
 
+  static async updatePromptVersion(versionId: string, updates: Partial<PromptVersion>, userId?: string): Promise<void> {
+    let query = supabase
+      .from('avatar_prompt_versions')
+      .update(updates)
+      .eq('id', versionId);
+
+    // Add user validation if provided
+    if (userId) {
+      query = query.eq('user_id', userId);
+    }
+
+    const { error } = await query;
+
+    if (error) throw new Error(`Failed to update prompt version: ${error.message}`);
+  }
+
   // =============================================
   // VERSION LINEAGE METHODS
   // =============================================
@@ -459,12 +475,34 @@ export class TrainingService {
         conversationAnalysis = await this.analyzeConversationPatterns(extractedContent, userId);
       }
 
+      onProgress?.('Getting current avatar prompt...', 60);
+
+      // Get the latest version's system prompt to build upon (progressive training)
+      const existingVersions = await this.getPromptVersions(avatarId, userId);
+      let currentAvatarPrompt: string;
+      let parentVersionId: string | undefined;
+
+      if (existingVersions.length > 0) {
+        // Find the most recent version to build upon
+        const latestVersion = existingVersions.reduce((latest, current) => {
+          return new Date(current.created_at!) > new Date(latest.created_at!) ? current : latest;
+        });
+        currentAvatarPrompt = latestVersion.system_prompt;
+        parentVersionId = latestVersion.id;
+      } else {
+        // No versions exist, use original avatar profile
+        currentAvatarPrompt = await this.getAvatarSystemPrompt(avatarId, userId);
+      }
+
       onProgress?.('Generating improved prompts...', 70);
 
-      // Generate improved system prompt
+      // Generate improved system prompt based on existing avatar prompt
+      // Use training instructions as the main enhancement guide
+      const enhancementInstructions = trainingData.training_instructions || 'Analyze the conversation examples and enhance the existing system prompt to match the communication style found in the examples.';
+
       const generatedPrompts = await this.generateImprovedPrompts(
-        trainingData.system_prompt || '',
-        trainingData.training_instructions || '',
+        currentAvatarPrompt,
+        enhancementInstructions,
         extractedContent,
         conversationAnalysis,
         userId
@@ -472,15 +510,15 @@ export class TrainingService {
 
       onProgress?.('Creating new prompt version...', 90);
 
-      // Get current version number for incrementing
-      const existingVersions = await this.getPromptVersions(avatarId, userId);
+      // Get current version number for incrementing (we already have existingVersions)
       const versionNumber = `v${existingVersions.length + 1}.0`;
 
-      // Create new prompt version
+      // Create new prompt version with parent reference
       const newVersion = await this.createPromptVersion({
         avatar_id: avatarId,
         user_id: userId,
         training_data_id: trainingDataId,
+        parent_version_id: parentVersionId, // Link to parent version for progressive training
         version_number: versionNumber,
         version_name: `Training Update ${new Date().toLocaleDateString()}`,
         description: `Generated from training session with ${files.length} files`,
@@ -488,6 +526,7 @@ export class TrainingService {
         personality_traits: generatedPrompts.personality_traits || [],
         behavior_rules: generatedPrompts.behavior_rules || [],
         response_style: generatedPrompts.response_style || {},
+        inheritance_type: 'incremental', // Mark as incremental improvement
         is_active: false, // Don't auto-activate, let user choose
         is_published: false
       });
@@ -565,7 +604,7 @@ export class TrainingService {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4-vision-preview',
+        model: 'gpt-4o',
         messages: [
           {
             role: 'user',
@@ -680,39 +719,51 @@ export class TrainingService {
       throw new Error('OpenAI API key required for prompt generation');
     }
 
-    const prompt = `You are an expert AI prompt engineer. Your task is to improve an avatar's system prompt based on training data and analysis.
+    const prompt = `You are an expert conversation designer. Your task is to create CONVERSATION GUIDELINES that enhance how the avatar communicates, WITHOUT changing their core identity, background, or personality.
 
-Current System Prompt:
-${currentSystemPrompt || 'No current prompt provided'}
+CURRENT AVATAR SYSTEM PROMPT (DO NOT MODIFY THE CORE CONTENT):
+${currentSystemPrompt || 'You are a helpful AI assistant. Respond in a friendly and helpful manner.'}
 
-Training Instructions:
-${trainingInstructions || 'No specific instructions provided'}
+USER'S CONVERSATION TRAINING INSTRUCTIONS:
+${trainingInstructions}
 
-Conversation Analysis:
-${JSON.stringify(conversationAnalysis, null, 2)}
+CONVERSATION ANALYSIS RESULTS:
+${JSON.stringify(conversationAnalysis || {}, null, 2).substring(0, 1000)}${JSON.stringify(conversationAnalysis || {}, null, 2).length > 1000 ? '...[truncated]' : ''}
 
-Extracted Conversation Content:
-${extractedContent || 'No conversation content provided'}
+CONVERSATION EXAMPLES:
+${(extractedContent || 'No conversation content provided').substring(0, 2000)}${(extractedContent || '').length > 2000 ? '...[truncated for length]' : ''}
 
-Please generate an improved system prompt and related configuration. Return a JSON object with this structure:
+TASK: Create CONVERSATION FINE-TUNING GUIDELINES based on the user's instructions. DO NOT rewrite the avatar's identity, background, or core personality. Instead, focus on HOW they should communicate.
+
+Your task is to:
+1. PRESERVE the entire original system prompt exactly as-is
+2. CREATE additional conversation guidelines that will be APPENDED to the original prompt
+3. Focus on communication style, greeting patterns, response formatting, language usage, etc.
+4. DO NOT change names, backgrounds, personality traits, or core avatar information
+
+Create conversation guidelines for these areas based on the training instructions:
+- Greeting behavior and introductions
+- Communication style and tone
+- Language usage (slang, formality, regional expressions)
+- Response patterns and formatting
+- Conversation flow and interaction style
+
+Return ONLY a valid JSON object with this exact structure:
 {
-  "system_prompt": "The complete improved system prompt that incorporates the training data",
-  "personality_traits": ["trait1", "trait2", ...],
-  "behavior_rules": ["rule1", "rule2", ...],
+  "original_prompt_preserved": true,
+  "conversation_guidelines": "Detailed conversation guidelines to be appended to the original prompt, focusing purely on HOW to communicate based on the training instructions",
+  "enhanced_system_prompt": "The complete original prompt + the new conversation guidelines appended at the end",
+  "behavior_rules": ["specific conversation behaviors from the training instructions"],
   "response_style": {
-    "formality": "casual/semi-formal/formal",
-    "emoji_usage": "none/minimal/moderate/heavy",
-    "response_length": "concise/detailed/adaptive",
-    "tone": "friendly/professional/supportive/etc"
+    "formality": "casual/formal based on training instructions",
+    "emoji_usage": "minimal/moderate/frequent based on instructions",
+    "response_length": "short/medium/long based on instructions",
+    "tone": "friendly/professional/etc based on instructions"
   },
-  "improvement_notes": "Summary of what was improved and why"
+  "improvement_notes": "Summary of the conversation enhancements added (without changing core identity)"
 }
 
-Focus on:
-1. Incorporating the communication style from the analysis
-2. Following the specific training instructions
-3. Maintaining consistency with the conversation examples
-4. Creating clear, actionable personality guidelines`;
+CRITICAL: Keep the avatar's identity, background, and personality completely intact. Only add conversation guidelines that improve HOW they communicate, not WHO they are.`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -721,13 +772,13 @@ Focus on:
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4',
+        model: 'gpt-4o',
         messages: [
-          { role: 'system', content: 'You are an expert AI prompt engineer specializing in avatar personality development.' },
+          { role: 'system', content: 'You are an expert AI prompt engineer specializing in avatar personality development. You make precise minimal changes while preserving all original content.' },
           { role: 'user', content: prompt }
         ],
-        max_tokens: 2000,
-        temperature: 0.7
+        max_tokens: 8000,
+        temperature: 0.3
       })
     });
 
@@ -740,10 +791,62 @@ Focus on:
     const generatedText = data.choices[0]?.message?.content || '{}';
 
     try {
-      return JSON.parse(generatedText);
+      // Try to parse as JSON first
+      const parsed = JSON.parse(generatedText);
+
+      // Transform the new format to the expected format
+      if (parsed.enhanced_system_prompt) {
+        return {
+          system_prompt: parsed.enhanced_system_prompt,
+          personality_traits: [],
+          behavior_rules: parsed.behavior_rules || [],
+          response_style: parsed.response_style || {},
+          improvement_notes: parsed.improvement_notes || 'Conversation guidelines added'
+        };
+      }
+
+      return parsed;
     } catch {
+      // If JSON parsing fails, try to extract JSON from the text
+      const jsonMatch = generatedText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+
+          // Transform the new format to the expected format
+          if (parsed.enhanced_system_prompt) {
+            return {
+              system_prompt: parsed.enhanced_system_prompt,
+              personality_traits: [],
+              behavior_rules: parsed.behavior_rules || [],
+              response_style: parsed.response_style || {},
+              improvement_notes: parsed.improvement_notes || 'Conversation guidelines added'
+            };
+          }
+
+          return parsed;
+        } catch {
+          // Still failed, fall back to extracting system prompt from the text
+        }
+      }
+
+      // Extract just the system_prompt if it's wrapped in quotes or backticks
+      let extractedPrompt = generatedText;
+      const systemPromptMatch = generatedText.match(/"enhanced_system_prompt":\s*"([^"]*?)"/);
+      if (systemPromptMatch) {
+        extractedPrompt = systemPromptMatch[1];
+      } else {
+        // Clean up common formatting issues
+        extractedPrompt = generatedText
+          .replace(/^```json\s*/, '')
+          .replace(/\s*```$/, '')
+          .replace(/^As no conversation examples.*?Here is the enhanced prompt:\s*/i, '')
+          .replace(/The improvements aim to.*$/s, '')
+          .trim();
+      }
+
       return {
-        system_prompt: generatedText,
+        system_prompt: extractedPrompt,
         improvement_notes: 'Generated prompt (parsing failed)',
         personality_traits: [],
         behavior_rules: [],
@@ -755,33 +858,67 @@ Focus on:
   // Delete a prompt version and its associated data
   static async deletePromptVersion(versionId: string, userId: string): Promise<void> {
     try {
+      console.log(`Attempting to delete version ${versionId} for user ${userId}`);
+
       // First check if this is the active version
-      const { data: activeCheck } = await supabase
+      const { data: activeCheck, error: activeError } = await supabase
         .from('avatar_prompt_versions')
-        .select('is_active, avatar_id')
+        .select('is_active, avatar_id, version_number')
         .eq('id', versionId)
         .eq('user_id', userId)
         .single();
 
+      if (activeError) {
+        console.error('Error checking active status:', activeError);
+        throw new Error(`Failed to verify version status: ${activeError.message}`);
+      }
+
+      if (!activeCheck) {
+        throw new Error('Version not found or you do not have permission to delete it.');
+      }
+
       if (activeCheck?.is_active) {
-        throw new Error('Cannot delete the active version. Please activate a different version first.');
+        throw new Error(`Cannot delete the active version (${activeCheck.version_number}). Please activate a different version first.`);
       }
 
       // Check if this version has child versions (descendants)
-      const { data: children } = await supabase
+      const { data: children, error: childError } = await supabase
         .from('avatar_prompt_versions')
-        .select('id')
+        .select('id, version_number')
         .eq('parent_version_id', versionId)
         .eq('user_id', userId);
 
-      if (children && children.length > 0) {
-        throw new Error('Cannot delete this version as it has dependent child versions. Please delete child versions first.');
+      if (childError) {
+        console.error('Error checking child versions:', childError);
+        throw new Error(`Failed to check dependent versions: ${childError.message}`);
       }
 
-      // Delete the prompt version (this will cascade to related training data due to FK constraints)
-      const { error } = await supabase
+      if (children && children.length > 0) {
+        const childVersions = children.map(c => c.version_number).join(', ');
+        throw new Error(`Cannot delete this version as it has dependent child versions: ${childVersions}. Please delete child versions first.`);
+      }
+
+      console.log('Proceeding with deletion...');
+
+      // First, let's verify the record exists and we can see it
+      const { data: verifyRecord, error: verifyError } = await supabase
         .from('avatar_prompt_versions')
-        .delete()
+        .select('id, version_number, user_id')
+        .eq('id', versionId)
+        .eq('user_id', userId)
+        .single();
+
+      if (verifyError || !verifyRecord) {
+        console.error('Cannot find record to delete:', verifyError);
+        throw new Error('Version not found or access denied');
+      }
+
+      console.log('Record found for deletion:', verifyRecord);
+
+      // Delete the prompt version (this will cascade to related training data due to FK constraints)
+      const { error, count } = await supabase
+        .from('avatar_prompt_versions')
+        .delete({ count: 'exact' })
         .eq('id', versionId)
         .eq('user_id', userId);
 
@@ -790,10 +927,128 @@ Focus on:
         throw new Error(`Failed to delete version: ${error.message}`);
       }
 
+      console.log(`Deletion result: ${count} rows affected`);
+
+      if (count === 0) {
+        throw new Error('No rows were deleted. This may be due to RLS policies or the record may not exist.');
+      }
+
       console.log('Successfully deleted prompt version:', versionId);
     } catch (error) {
       console.error('Error in deletePromptVersion:', error);
       throw error;
     }
+  }
+
+  // Get avatar's current system prompt (generated from full profile or stored)
+  static async getAvatarSystemPrompt(avatarId: string, userId: string): Promise<string> {
+    try {
+      const { data: avatar, error } = await supabase
+        .from('avatars')
+        .select(`
+          system_prompt,
+          name,
+          description,
+          age,
+          gender,
+          origin_country,
+          primary_language,
+          secondary_languages,
+          mbti_type,
+          personality_traits,
+          backstory,
+          hidden_rules,
+          favorites,
+          lifestyle,
+          voice_description
+        `)
+        .eq('id', avatarId)
+        .eq('user_id', userId)
+        .single();
+
+      if (error) {
+        console.error('Error fetching avatar data:', error);
+        throw new Error(`Failed to fetch avatar data: ${error.message}`);
+      }
+
+      // If avatar has a custom system_prompt, use it
+      if (avatar?.system_prompt && avatar.system_prompt.trim() !== '') {
+        return avatar.system_prompt;
+      }
+
+      // Otherwise, generate comprehensive prompt from avatar profile
+      return this.generateBaseSystemPrompt(avatar);
+    } catch (error) {
+      console.error('Error in getAvatarSystemPrompt:', error);
+      throw error;
+    }
+  }
+
+  // Generate base system prompt from avatar profile
+  static generateBaseSystemPrompt(avatar: any): string {
+    const prompt = [];
+
+    // Core Identity
+    prompt.push(`You are ${avatar.name || 'an AI assistant'}.`);
+
+    if (avatar.description) {
+      prompt.push(avatar.description);
+    }
+
+    // Demographics & Background
+    const demographics = [];
+    if (avatar.age) demographics.push(`${avatar.age} years old`);
+    if (avatar.gender) demographics.push(avatar.gender);
+    if (avatar.origin_country) demographics.push(`from ${avatar.origin_country}`);
+
+    if (demographics.length > 0) {
+      prompt.push(`You are ${demographics.join(', ')}.`);
+    }
+
+    // Languages
+    if (avatar.primary_language) {
+      prompt.push(`Your primary language is ${avatar.primary_language}.`);
+      if (avatar.secondary_languages && avatar.secondary_languages.length > 0) {
+        prompt.push(`You also speak: ${avatar.secondary_languages.join(', ')}.`);
+      }
+    }
+
+    // Personality & MBTI
+    if (avatar.mbti_type) {
+      prompt.push(`Your MBTI personality type is ${avatar.mbti_type}.`);
+    }
+
+    if (avatar.personality_traits && avatar.personality_traits.length > 0) {
+      prompt.push(`Your key personality traits include: ${avatar.personality_traits.join(', ')}.`);
+    }
+
+    // Backstory
+    if (avatar.backstory) {
+      prompt.push(`Background: ${avatar.backstory}`);
+    }
+
+    // Favorites & Lifestyle
+    if (avatar.favorites && avatar.favorites.length > 0) {
+      prompt.push(`Things you enjoy: ${avatar.favorites.join(', ')}.`);
+    }
+
+    if (avatar.lifestyle && avatar.lifestyle.length > 0) {
+      prompt.push(`Your lifestyle: ${avatar.lifestyle.join(', ')}.`);
+    }
+
+    // Voice & Communication Style
+    if (avatar.voice_description) {
+      prompt.push(`Communication style: ${avatar.voice_description}`);
+    }
+
+    // Hidden Rules (Important behavioral guidelines)
+    if (avatar.hidden_rules) {
+      prompt.push(`Important guidelines: ${avatar.hidden_rules}`);
+    }
+
+    // Default behavior
+    prompt.push(`Always respond in character, maintaining your personality and background throughout the conversation.`);
+
+    return prompt.join(' ');
   }
 }

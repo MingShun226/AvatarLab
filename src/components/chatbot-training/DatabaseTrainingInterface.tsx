@@ -37,9 +37,11 @@ export const DatabaseTrainingInterface: React.FC<DatabaseTrainingInterfaceProps>
   onTrainingStart,
   onTrainingComplete
 }) => {
-  const [systemPrompt, setSystemPrompt] = useState('');
-  const [userPrompt, setUserPrompt] = useState('');
-  const [trainingInstructions, setTrainingInstructions] = useState('');
+  const [trainingInstructions, setTrainingInstructions] = useState(() => {
+    // Load from localStorage on initial render
+    const saved = localStorage.getItem(`training-instructions-${avatarId}`);
+    return saved || '';
+  });
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [currentTrainingSession, setCurrentTrainingSession] = useState<TrainingData | null>(null);
   const [trainingFiles, setTrainingFiles] = useState<TrainingFile[]>([]);
@@ -63,6 +65,13 @@ export const DatabaseTrainingInterface: React.FC<DatabaseTrainingInterfaceProps>
       }, 100);
     }
   }, [user, avatarId]);
+
+  // Save training instructions to localStorage whenever they change
+  useEffect(() => {
+    if (avatarId) {
+      localStorage.setItem(`training-instructions-${avatarId}`, trainingInstructions);
+    }
+  }, [trainingInstructions, avatarId]);
 
   const loadPromptVersions = async () => {
     try {
@@ -108,10 +117,10 @@ export const DatabaseTrainingInterface: React.FC<DatabaseTrainingInterfaceProps>
   };
 
   const handleTraining = async () => {
-    if (!systemPrompt.trim() && !userPrompt.trim() && !trainingInstructions.trim() && uploadedFiles.length === 0) {
+    if (!trainingInstructions.trim() && uploadedFiles.length === 0) {
       toast({
         title: "No Training Data",
-        description: "Please provide training data before starting.",
+        description: "Please describe what needs to be enhanced or upload conversation examples.",
         variant: "destructive"
       });
       return;
@@ -126,8 +135,6 @@ export const DatabaseTrainingInterface: React.FC<DatabaseTrainingInterfaceProps>
       const trainingData: Omit<TrainingData, 'id' | 'created_at' | 'updated_at'> = {
         user_id: user!.id,
         avatar_id: avatarId,
-        system_prompt: systemPrompt.trim() || undefined,
-        user_prompt_template: userPrompt.trim() || undefined,
         training_instructions: trainingInstructions.trim() || undefined,
         training_type: uploadedFiles.length > 0 ? 'file_upload' : 'prompt_update',
         status: 'pending'
@@ -173,10 +180,9 @@ export const DatabaseTrainingInterface: React.FC<DatabaseTrainingInterfaceProps>
         description: `New prompt version ${newVersion.version_number} has been generated!`,
       });
 
-      // Clear form
-      setSystemPrompt('');
-      setUserPrompt('');
+      // Clear form and localStorage
       setTrainingInstructions('');
+      localStorage.removeItem(`training-instructions-${avatarId}`);
       setUploadedFiles([]);
       setCurrentTrainingSession(null);
       setTrainingFiles([]);
@@ -234,18 +240,11 @@ export const DatabaseTrainingInterface: React.FC<DatabaseTrainingInterfaceProps>
             Train Avatar: {avatarName}
           </CardTitle>
           <CardDescription>
-            Use advanced AI training to improve your avatar's personality and responses
+            Improve your avatar's personality and communication style with simple instructions
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
-          <Tabs defaultValue="training" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="training">Training Data</TabsTrigger>
-              <TabsTrigger value="versions">Prompt Versions</TabsTrigger>
-            </TabsList>
-
-            {/* Training Tab */}
-            <TabsContent value="training" className="space-y-4">
+          <div className="space-y-4">
               {/* Progress Bar */}
               {isTraining && (
                 <div className="space-y-2">
@@ -258,32 +257,27 @@ export const DatabaseTrainingInterface: React.FC<DatabaseTrainingInterfaceProps>
                 </div>
               )}
 
-              {/* Prompt Input */}
+              {/* Simplified Enhancement Input */}
               <div className="space-y-4">
                 <div>
                   <h4 className="text-sm font-medium flex items-center gap-2 mb-2">
                     <Wand2 className="h-4 w-4" />
-                    System Prompt Enhancement
+                    Conversation Style Training
                   </h4>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Train how your avatar communicates without changing their identity or background.
+                  </p>
                   <Textarea
-                    placeholder="Provide the current system prompt or improvements you want to make..."
-                    value={systemPrompt}
-                    onChange={(e) => setSystemPrompt(e.target.value)}
-                    className="min-h-[100px]"
-                    disabled={isTraining}
-                  />
-                </div>
-
-                <div>
-                  <h4 className="text-sm font-medium flex items-center gap-2 mb-2">
-                    <Brain className="h-4 w-4" />
-                    Training Instructions
-                  </h4>
-                  <Textarea
-                    placeholder="Describe how you want your avatar to behave. Examples: 'Be more casual and friendly', 'Use fewer emojis', 'Respond like a professional coach'..."
+                    placeholder="Describe how you want your avatar to communicate. Examples:
+• 'When greeting, be more casual and introduce yourself first'
+• 'Use Malaysian slang like lah, lor, and shortforms'
+• 'Respond in a more friendly, buddy-like way'
+• 'Be more professional in tone'
+• 'Use fewer emojis and be more formal'
+• 'Ask follow-up questions to keep conversations going'"
                     value={trainingInstructions}
                     onChange={(e) => setTrainingInstructions(e.target.value)}
-                    className="min-h-[120px]"
+                    className="min-h-[140px]"
                     disabled={isTraining}
                   />
                 </div>
@@ -363,7 +357,7 @@ export const DatabaseTrainingInterface: React.FC<DatabaseTrainingInterfaceProps>
               <Button
                 onClick={handleTraining}
                 disabled={isTraining}
-                className="btn-hero w-full"
+                className="w-full transition-transform duration-200 hover:scale-[1.02] active:scale-[0.98]"
               >
                 {isTraining ? (
                   <>
@@ -373,7 +367,7 @@ export const DatabaseTrainingInterface: React.FC<DatabaseTrainingInterfaceProps>
                 ) : (
                   <>
                     <Brain className="mr-2 h-4 w-4" />
-                    Start Advanced Training
+                    Improve Avatar
                   </>
                 )}
               </Button>
@@ -406,90 +400,18 @@ export const DatabaseTrainingInterface: React.FC<DatabaseTrainingInterfaceProps>
                   </div>
                 </div>
               )}
-            </TabsContent>
 
-            {/* Versions Tab */}
-            <TabsContent value="versions" className="space-y-4">
-              {/* Active Version */}
-              {activeVersion && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                  <h4 className="font-medium text-blue-900 mb-2 flex items-center gap-2">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Currently Active: {activeVersion.version_number}
-                  </h4>
-                  <p className="text-sm text-blue-800 mb-2">{activeVersion.description}</p>
-                  <div className="text-xs text-blue-600">
-                    Created: {new Date(activeVersion.created_at!).toLocaleString()}
-                  </div>
-                </div>
-              )}
-
-              {/* Version History */}
-              <div className="space-y-3">
-                <h4 className="font-medium">All Versions ({promptVersions.length})</h4>
-                {promptVersions.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    <Brain className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>No prompt versions yet. Create your first training session!</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {promptVersions.map((version) => (
-                      <div
-                        key={version.id}
-                        className={`p-3 border rounded-lg ${version.is_active ? 'bg-blue-50 border-blue-200' : ''}`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{version.version_number}</span>
-                              {version.is_active && (
-                                <Badge variant="default" className="text-xs">
-                                  Active
-                                </Badge>
-                              )}
-                              {version.version_name && (
-                                <span className="text-sm text-muted-foreground">
-                                  - {version.version_name}
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-sm text-muted-foreground mt-1">
-                              {version.description}
-                            </p>
-                            <div className="text-xs text-muted-foreground mt-1">
-                              {new Date(version.created_at!).toLocaleString()}
-                            </div>
-                          </div>
-                          {!version.is_active && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => activateVersion(version.id!)}
-                            >
-                              <Play className="mr-2 h-3 w-3" />
-                              Activate
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+              {/* Training Info */}
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 className="font-medium text-blue-900 mb-2">How Smart Learning Works</h4>
+                <ul className="text-sm text-blue-800 space-y-1">
+                  <li>• <strong>Describe Changes:</strong> Tell us what you want to improve about your avatar</li>
+                  <li>• <strong>Upload Examples:</strong> Share conversation screenshots for the AI to learn from</li>
+                  <li>• <strong>AI Enhancement:</strong> Our AI will update your avatar based on your instructions</li>
+                  <li>• <strong>Continuous Learning:</strong> Avatar gets better from chat feedback (👍/👎)</li>
+                  <li>• <strong>FREE Learning:</strong> No additional costs - learns from every conversation</li>
+                </ul>
               </div>
-            </TabsContent>
-          </Tabs>
-
-          {/* Training Info */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h4 className="font-medium text-blue-900 mb-2">Advanced AI Training Features</h4>
-            <ul className="text-sm text-blue-800 space-y-1">
-              <li>• <strong>Image OCR:</strong> Extracts text from conversation screenshots using GPT-4 Vision</li>
-              <li>• <strong>Pattern Analysis:</strong> AI analyzes conversation styles and personality traits</li>
-              <li>• <strong>Prompt Generation:</strong> Creates optimized system prompts based on training data</li>
-              <li>• <strong>Version Control:</strong> Manages multiple prompt versions with activation controls</li>
-              <li>• <strong>Database Storage:</strong> All training data and results stored securely</li>
-            </ul>
           </div>
         </CardContent>
       </Card>

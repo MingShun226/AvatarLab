@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
+import { Input } from '@/components/ui/input';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,6 +14,14 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
   History,
   CheckCircle2,
   Clock,
@@ -24,10 +32,15 @@ import {
   FileText,
   Image,
   AlertCircle,
-  Trash2
+  Trash2,
+  MessageCircle,
+  Edit2,
+  Check,
+  X
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
 import { TrainingService, PromptVersion, TrainingData } from '@/services/trainingService';
 import { VersionDetailsModal } from './VersionDetailsModal';
 
@@ -48,6 +61,10 @@ export const DatabaseVersionControl: React.FC<DatabaseVersionControlProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [versionToDelete, setVersionToDelete] = useState<PromptVersion | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [originalPrompt, setOriginalPrompt] = useState<string>('');
+  const [isViewingOriginal, setIsViewingOriginal] = useState(false);
+  const [editingVersionId, setEditingVersionId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
   const { toast } = useToast();
   const { user } = useAuth();
 
@@ -158,6 +175,134 @@ export const DatabaseVersionControl: React.FC<DatabaseVersionControlProps> = ({
     setVersionToDelete(null);
   };
 
+  const viewOriginalPrompt = async () => {
+    if (!user) return;
+
+    try {
+      const prompt = await TrainingService.getAvatarSystemPrompt(avatarId, user.id);
+      setOriginalPrompt(prompt);
+      setIsViewingOriginal(true);
+    } catch (error) {
+      console.error('Failed to fetch original prompt:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load original prompt",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const startEditingName = (version: PromptVersion) => {
+    setEditingVersionId(version.id!);
+    setEditingName(version.version_name || '');
+  };
+
+  const saveVersionName = async () => {
+    if (!editingVersionId || !user) return;
+
+    try {
+      const { error } = await supabase
+        .from('avatar_prompt_versions')
+        .update({ version_name: editingName.trim() || null })
+        .eq('id', editingVersionId)
+        .eq('user_id', user.id);
+
+      if (error) throw error;
+
+      toast({
+        title: "Name Updated",
+        description: "Version name has been updated successfully.",
+      });
+
+      setEditingVersionId(null);
+      setEditingName('');
+      await loadVersionData();
+    } catch (error) {
+      console.error('Error updating version name:', error);
+      toast({
+        title: "Update Failed",
+        description: "Failed to update version name.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const cancelEditingName = () => {
+    setEditingVersionId(null);
+    setEditingName('');
+  };
+
+  const createV1Version = async () => {
+    if (!user) return;
+
+    try {
+      // Get avatar data to create v1.0
+      const { data: avatar, error } = await supabase
+        .from('avatars')
+        .select('*')
+        .eq('id', avatarId)
+        .eq('user_id', user.id)
+        .single();
+
+      if (error || !avatar) {
+        throw new Error('Avatar not found');
+      }
+
+      const systemPrompt = TrainingService.generateBaseSystemPrompt(avatar);
+
+      // Update avatar with generated system prompt if it doesn't have one
+      if (!avatar.system_prompt) {
+        await supabase
+          .from('avatars')
+          .update({ system_prompt: systemPrompt })
+          .eq('id', avatarId);
+      }
+
+      // Create version 1.0
+      await TrainingService.createPromptVersion({
+        avatar_id: avatarId,
+        user_id: user.id,
+        training_data_id: null,
+        version_number: 'v1.0',
+        version_name: 'Original Avatar Profile',
+        description: 'Initial version generated from avatar profile details',
+        system_prompt: avatar.system_prompt || systemPrompt,
+        personality_traits: avatar.personality_traits || [],
+        behavior_rules: [],
+        response_style: {
+          formality: 'casual',
+          emoji_usage: 'minimal',
+          response_length: 'adaptive',
+          tone: 'friendly'
+        },
+        is_active: true,
+        is_published: false,
+        usage_count: 0,
+        rating: null,
+        feedback_notes: null,
+        parent_version_id: null,
+        changes_from_parent: null,
+        inheritance_type: 'full',
+        base_version_id: null
+      });
+
+      toast({
+        title: "Version Created",
+        description: "v1.0 has been created from your avatar profile",
+      });
+
+      // Reload data to show the new version
+      loadVersionData();
+    } catch (error) {
+      console.error('Failed to create v1.0:', error);
+      toast({
+        title: "Error",
+        description: "Failed to create v1.0 version",
+        variant: "destructive"
+      });
+    }
+  };
+
   const getStatusIcon = (isActive: boolean) => {
     return isActive ?
       <Play className="h-4 w-4 text-green-600" /> :
@@ -232,25 +377,35 @@ export const DatabaseVersionControl: React.FC<DatabaseVersionControlProps> = ({
             </div>
           </div>
 
-          {/* No versions message */}
+          {/* Show message only when no versions exist */}
           {promptVersions.length === 0 ? (
             <div className="text-center py-8">
               <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-              <h3 className="text-lg font-semibold mb-2">No Training Versions Yet</h3>
+              <h3 className="text-lg font-semibold mb-2">No Versions Yet</h3>
               <p className="text-muted-foreground mb-4">
-                Start training your avatar to create version history
+                Create v1.0 from your avatar profile to get started
               </p>
-              <Button onClick={() => window.location.hash = '#train'}>
-                <Brain className="mr-2 h-4 w-4" />
-                Start Training
-              </Button>
+              <div className="flex gap-2 justify-center">
+                <Button
+                  variant="outline"
+                  onClick={() => viewOriginalPrompt()}
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  View Original Prompt
+                </Button>
+                <Button
+                  onClick={() => createV1Version()}
+                >
+                  <FileText className="mr-2 h-4 w-4" />
+                  Create v1.0
+                </Button>
+              </div>
             </div>
           ) : (
             /* Version List */
             promptVersions.map((version) => {
               const isActive = activeVersion?.id === version.id;
               const trainingSession = trainingSessions.find(s => s.id === version.training_data_id);
-              const accuracy = calculateAccuracy(version);
 
               return (
                 <div
@@ -277,42 +432,56 @@ export const DatabaseVersionControl: React.FC<DatabaseVersionControlProps> = ({
                     </div>
                   </div>
 
-                  <p className="text-sm mb-3">
-                    {version.description || version.version_name || 'No description available'}
-                  </p>
-
-                  {/* Training Quality Score */}
+                  {/* Version Name */}
                   <div className="mb-3">
-                    <div className="flex items-center justify-between text-sm mb-1">
-                      <span>Training Quality:</span>
-                      <span className="font-medium">{accuracy}%</span>
-                    </div>
-                    <Progress value={accuracy} className="h-2" />
+                    {editingVersionId === version.id ? (
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          placeholder="Enter version name..."
+                          className="text-sm"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveVersionName();
+                            if (e.key === 'Escape') cancelEditingName();
+                          }}
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={saveVersionName}
+                        >
+                          <Check className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={cancelEditingName}
+                        >
+                          <X className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">
+                          {version.version_name || 'Unnamed Version'}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => startEditingName(version)}
+                          className="h-6 w-6 p-0"
+                        >
+                          <Edit2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {version.description || 'No description available'}
+                    </p>
                   </div>
 
-                  {/* Features */}
-                  <div className="flex flex-wrap gap-2 mb-3">
-                    {version.personality_traits && version.personality_traits.length > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        {version.personality_traits.length} Personality Traits
-                      </Badge>
-                    )}
-                    {version.behavior_rules && version.behavior_rules.length > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        {version.behavior_rules.length} Behavior Rules
-                      </Badge>
-                    )}
-                    {version.response_style && Object.keys(version.response_style).length > 0 && (
-                      <Badge variant="outline" className="text-xs">
-                        Response Style Configured
-                      </Badge>
-                    )}
-                    {trainingSession && (
-                      <Badge variant="outline" className="text-xs">
-                        {trainingSession.training_type.replace('_', ' ').toUpperCase()}
-                      </Badge>
-                    )}
-                  </div>
+
 
                   {/* Actions */}
                   <div className="flex gap-2">
@@ -360,12 +529,12 @@ export const DatabaseVersionControl: React.FC<DatabaseVersionControlProps> = ({
 
           {/* Info Section */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <h4 className="font-medium text-blue-900 mb-2">Version Control Features</h4>
+            <h4 className="font-medium text-blue-900 mb-2">Version Management</h4>
             <ul className="text-sm text-blue-800 space-y-1">
-              <li>• <strong>Training Quality:</strong> Estimated effectiveness based on prompt features</li>
-              <li>• <strong>Version Activation:</strong> Switch between different trained personalities</li>
-              <li>• <strong>Safe Rollback:</strong> Return to previous versions or original personality</li>
-              <li>• <strong>Training History:</strong> Track what data was used for each version</li>
+              <li>• <strong>Switch Versions:</strong> Activate different trained personalities</li>
+              <li>• <strong>Edit Names:</strong> Customize version names for easy identification</li>
+              <li>• <strong>View Details:</strong> See exactly what changed in each version</li>
+              <li>• <strong>Safe Rollback:</strong> Return to previous versions anytime</li>
             </ul>
           </div>
         </div>
@@ -381,12 +550,12 @@ export const DatabaseVersionControl: React.FC<DatabaseVersionControlProps> = ({
             </AlertDialogTitle>
             <AlertDialogDescription>
               Are you sure you want to delete this training version? This action cannot be undone.
-              {versionToDelete?.description && (
-                <div className="mt-2 p-2 bg-muted rounded text-sm">
-                  <strong>Version:</strong> {versionToDelete.description}
-                </div>
-              )}
             </AlertDialogDescription>
+            {versionToDelete?.description && (
+              <div className="mt-2 p-2 bg-muted rounded text-sm">
+                <strong>Version:</strong> {versionToDelete.description}
+              </div>
+            )}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={cancelDeleteVersion} disabled={isDeleting}>
@@ -409,7 +578,36 @@ export const DatabaseVersionControl: React.FC<DatabaseVersionControlProps> = ({
         onClose={() => setIsModalOpen(false)}
         version={selectedVersion}
         trainingSession={selectedVersion ? trainingSessions.find(s => s.id === selectedVersion.training_data_id) || null : null}
+        avatarId={avatarId}
+        onVersionUpdated={loadVersionData}
       />
+
+      {/* Original Prompt Viewer */}
+      <Dialog open={isViewingOriginal} onOpenChange={setIsViewingOriginal}>
+        <DialogContent className="max-w-3xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <MessageCircle className="h-5 w-5" />
+              Original Avatar System Prompt
+            </DialogTitle>
+            <DialogDescription>
+              This is the system prompt generated from your avatar's profile details
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[60vh] w-full">
+            <div className="p-4 bg-muted/50 rounded-lg">
+              <pre className="text-sm whitespace-pre-wrap font-mono">
+                {originalPrompt}
+              </pre>
+            </div>
+          </ScrollArea>
+          <div className="flex justify-end">
+            <Button onClick={() => setIsViewingOriginal(false)}>
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 };

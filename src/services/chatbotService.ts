@@ -2,6 +2,7 @@ import { apiKeyService } from './apiKeyService';
 import { supabase } from '@/integrations/supabase/client';
 import { RAGService } from './ragService';
 import { TrainingService } from './trainingService';
+import { SmartPromptService } from './smartPromptService';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
@@ -15,6 +16,8 @@ export interface AvatarContext {
   personality_traits?: string[];
   mbti_type?: string;
   hidden_rules?: string;
+  customSystemPrompt?: string;
+  fineTunedModelId?: string;
 }
 
 export const chatbotService = {
@@ -62,15 +65,19 @@ export const chatbotService = {
       // Get basic knowledge base info (for files without RAG processing)
       const knowledgeBase = await this.getKnowledgeBaseContent(userId, avatarContext.id);
 
-      // Create system prompt with RAG-enhanced context
-      const systemPrompt = await this.createSystemPromptWithRAG(avatarContext, knowledgeBase, ragResults.chunks, message, userId);
+      // Create system prompt with RAG-enhanced context and smart patterns
+      const baseSystemPrompt = await this.createSystemPromptWithRAG(avatarContext, knowledgeBase, ragResults.chunks, message, userId);
+      const systemPrompt = await SmartPromptService.generateSmartPrompt(userId, avatarContext.id, message, baseSystemPrompt);
 
       // Prepare messages for OpenAI
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
-        ...conversationHistory.slice(-10), // Keep last 10 messages for context
+        ...conversationHistory.slice(-30), // Keep last 30 messages for context
         { role: 'user', content: message }
       ];
+
+      // Use fine-tuned model if available
+      const modelToUse = avatarContext.fineTunedModelId || model;
 
       // Call OpenAI API
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -80,9 +87,9 @@ export const chatbotService = {
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          model,
+          model: modelToUse,
           messages,
-          max_tokens: this.getMaxTokensForModel(model),
+          max_tokens: this.getMaxTokensForModel(modelToUse),
           temperature: 0.7
         })
       });
@@ -105,7 +112,21 @@ export const chatbotService = {
         throw new Error('Invalid response from OpenAI API');
       }
 
-      return data.choices[0].message.content;
+      const avatarResponse = data.choices[0].message.content;
+
+      // Learn from this conversation (async, don't block response)
+      SmartPromptService.learnFromConversations(
+        userId,
+        avatarContext.id,
+        message,
+        avatarResponse,
+        'neutral', // Default to neutral, user can provide feedback later
+        Date.now().toString() // Use timestamp as session ID
+      ).catch(error => {
+        console.warn('Failed to learn from conversation:', error);
+      });
+
+      return avatarResponse;
 
     } catch (error) {
       console.error('Chatbot service error:', error);
@@ -125,7 +146,7 @@ export const chatbotService = {
         .select('file_name, original_name, extracted_text, file_size, content_type')
         .eq('user_id', userId)
         .eq('avatar_id', avatarId)
-        .eq('status', 'active');
+        .eq('is_linked', true);
 
       if (error) {
         console.error('Error fetching knowledge base:', error);
@@ -162,40 +183,63 @@ Note: I can see this document exists in my knowledge base, but the text content 
   },
 
   async createSystemPromptWithRAG(avatarContext: AvatarContext, knowledgeBase: string[], ragChunks: any[], userQuery: string, userId: string): Promise<string> {
-    // Try to get trained prompt version first
+    // Use customSystemPrompt if provided, otherwise try to get trained prompt version
     let basePrompt = `You are ${avatarContext.name}, an AI avatar with a unique personality.`;
 
-    try {
-      const activeVersion = await TrainingService.getActivePromptVersion(avatarContext.id, userId);
-      if (activeVersion) {
-        // Use the trained system prompt as the base
-        basePrompt = activeVersion.system_prompt;
+    if (avatarContext.customSystemPrompt) {
+      // Use the selected version's system prompt directly
+      basePrompt = avatarContext.customSystemPrompt;
+    } else {
+      try {
+        const activeVersion = await TrainingService.getActivePromptVersion(avatarContext.id, userId);
+        if (activeVersion) {
+          // Use the trained system prompt as the base
+          basePrompt = activeVersion.system_prompt;
 
-        // Add personality traits from training if available
-        if (activeVersion.personality_traits && activeVersion.personality_traits.length > 0) {
-          basePrompt += `\n\nYour trained personality traits: ${activeVersion.personality_traits.join(', ')}`;
-        }
+          // Add personality traits from training if available
+          if (activeVersion.personality_traits && activeVersion.personality_traits.length > 0) {
+            basePrompt += `\n\nYour trained personality traits: ${activeVersion.personality_traits.join(', ')}`;
+          }
 
-        // Add behavior rules from training if available
-        if (activeVersion.behavior_rules && activeVersion.behavior_rules.length > 0) {
-          basePrompt += `\n\nTrained behavior guidelines: ${activeVersion.behavior_rules.join(' ')}`;
-        }
+          // Add behavior rules from training if available
+          if (activeVersion.behavior_rules && activeVersion.behavior_rules.length > 0) {
+            basePrompt += `\n\nTrained behavior guidelines: ${activeVersion.behavior_rules.join(' ')}`;
+          }
 
-        // Apply response style if available
-        if (activeVersion.response_style) {
-          const style = activeVersion.response_style as any;
-          if (style.formality) {
-            basePrompt += `\n\nCommunication style: ${style.formality}`;
+          // Apply response style if available
+          if (activeVersion.response_style) {
+            const style = activeVersion.response_style as any;
+            if (style.formality) {
+              basePrompt += `\n\nCommunication style: ${style.formality}`;
+            }
+            if (style.tone) {
+              basePrompt += `\n\nTone: ${style.tone}`;
+            }
+            if (style.emoji_usage) {
+              basePrompt += `\n\nEmoji usage: ${style.emoji_usage}`;
+            }
           }
-          if (style.tone) {
-            basePrompt += `\n\nTone: ${style.tone}`;
+        } else {
+          // Fall back to original avatar data if no trained version exists
+          if (avatarContext.backstory) {
+            basePrompt += `\n\nYour backstory: ${avatarContext.backstory}`;
           }
-          if (style.emoji_usage) {
-            basePrompt += `\n\nEmoji usage: ${style.emoji_usage}`;
+
+          if (avatarContext.personality_traits && avatarContext.personality_traits.length > 0) {
+            basePrompt += `\n\nYour personality traits: ${avatarContext.personality_traits.join(', ')}`;
+          }
+
+          if (avatarContext.mbti_type) {
+            basePrompt += `\n\nYour MBTI type: ${avatarContext.mbti_type}`;
+          }
+
+          if (avatarContext.hidden_rules) {
+            basePrompt += `\n\nImportant behavioral guidelines: ${avatarContext.hidden_rules}`;
           }
         }
-      } else {
-        // Fall back to original avatar data if no trained version exists
+      } catch (error) {
+        console.warn('Could not load trained prompt, using default:', error);
+        // Fall back to original avatar data
         if (avatarContext.backstory) {
           basePrompt += `\n\nYour backstory: ${avatarContext.backstory}`;
         }
@@ -211,24 +255,6 @@ Note: I can see this document exists in my knowledge base, but the text content 
         if (avatarContext.hidden_rules) {
           basePrompt += `\n\nImportant behavioral guidelines: ${avatarContext.hidden_rules}`;
         }
-      }
-    } catch (error) {
-      console.warn('Could not load trained prompt, using default:', error);
-      // Fall back to original avatar data
-      if (avatarContext.backstory) {
-        basePrompt += `\n\nYour backstory: ${avatarContext.backstory}`;
-      }
-
-      if (avatarContext.personality_traits && avatarContext.personality_traits.length > 0) {
-        basePrompt += `\n\nYour personality traits: ${avatarContext.personality_traits.join(', ')}`;
-      }
-
-      if (avatarContext.mbti_type) {
-        basePrompt += `\n\nYour MBTI type: ${avatarContext.mbti_type}`;
-      }
-
-      if (avatarContext.hidden_rules) {
-        basePrompt += `\n\nImportant behavioral guidelines: ${avatarContext.hidden_rules}`;
       }
     }
 
