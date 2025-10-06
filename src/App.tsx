@@ -19,6 +19,7 @@ import Settings from '@/pages/Settings';
 import { Toaster } from "@/components/ui/toaster"
 import { Toaster as SonnerToaster } from "@/components/ui/sonner"
 import CreateAvatar from '@/pages/CreateAvatar';
+import APIKeys from '@/pages/APIKeys';
 
 import { useAuth } from '@/hooks/useAuth';
 import { SidebarProvider } from '@/contexts/SidebarContext';
@@ -124,6 +125,10 @@ function App() {
           <Route
             path="/settings"
             element={user ? <Settings /> : <Navigate to="/auth" />}
+          />
+          <Route
+            path="/api-keys"
+            element={user ? <APIKeys /> : <Navigate to="/auth" />}
           />
           <Route path="*" element={<NotFound />} />
         </Routes>

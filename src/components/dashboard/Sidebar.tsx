@@ -5,7 +5,7 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import { Button } from '@/components/ui/button';
 import {
   LayoutDashboard,
-  MessageSquare,
+  MessageCircle,
   Mic,
   Image,
   User,
@@ -17,7 +17,8 @@ import {
   Menu,
   X,
   UserCircle,
-  CreditCard
+  CreditCard,
+  Key
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -29,12 +30,13 @@ interface SidebarProps {
 const navigationItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
   { id: 'marketplace', label: 'Avatar Marketplace', icon: ShoppingBag, path: '/marketplace' },
-  { id: 'chatbot', label: 'AI Chatbot', icon: MessageSquare, path: '/chatbot-studio' },
+  { id: 'chatbot', label: 'AI Chatbot', icon: MessageCircle, path: '/chatbot-studio' },
   { id: 'tts', label: 'TTS Voice', icon: Mic, path: '/tts-studio' },
   { id: 'images', label: 'AI Images', icon: Image, path: '/images-studio' },
   { id: 'avatar', label: 'AI Avatar', icon: User, path: '/avatar-studio' },
   { id: 'learning-path', label: 'Learning Path', icon: GitBranch, path: '/learning-path' },
   { id: 'my-avatar', label: 'My Avatar', icon: UserCircle, path: '/my-avatars' },
+  { id: 'api-keys', label: 'API Keys', icon: Key, path: '/api-keys' },
   { id: 'billing', label: 'Billing & Plans', icon: CreditCard, path: '/billing' },
 ];
 

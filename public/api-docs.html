@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AvatarLab API Documentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #1e293b 0%, #7e22ce 50%, #1e293b 100%);
+            color: #e2e8f0;
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, #a78bfa 0%, #ec4899 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        h2 {
+            font-size: 2rem;
+            margin: 30px 0 15px;
+            color: #a78bfa;
+        }
+
+        h3 {
+            font-size: 1.5rem;
+            margin: 20px 0 10px;
+            color: #ec4899;
+        }
+
+        .subtitle {
+            font-size: 1.2rem;
+            color: #cbd5e1;
+            margin-bottom: 30px;
+        }
+
+        .endpoint {
+            background: rgba(15, 23, 42, 0.6);
+            border-left: 4px solid #a78bfa;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+
+        .method {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-weight: bold;
+            font-size: 0.9rem;
+            margin-right: 10px;
+        }
+
+        .method.post {
+            background: #10b981;
+            color: white;
+        }
+
+        .method.get {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .url {
+            font-family: 'Courier New', monospace;
+            color: #fbbf24;
+            font-size: 1.1rem;
+        }
+
+        pre {
+            background: #0f172a;
+            padding: 15px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 15px 0;
+            border: 1px solid #334155;
+        }
+
+        code {
+            font-family: 'Courier New', monospace;
+            color: #34d399;
+        }
+
+        .param-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+
+        .param-table th {
+            background: #7e22ce;
+            color: white;
+            padding: 12px;
+            text-align: left;
+        }
+
+        .param-table td {
+            background: rgba(15, 23, 42, 0.4);
+            padding: 10px 12px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .param-table tr:hover td {
+            background: rgba(126, 34, 206, 0.2);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+
+        .badge.required {
+            background: #ef4444;
+            color: white;
+        }
+
+        .badge.optional {
+            background: #6b7280;
+            color: white;
+        }
+
+        .note {
+            background: rgba(59, 130, 246, 0.1);
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+
+        .warning {
+            background: rgba(245, 158, 11, 0.1);
+            border-left: 4px solid #f59e0b;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+
+        .success {
+            background: rgba(16, 185, 129, 0.1);
+            border-left: 4px solid #10b981;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 AvatarLab API Documentation</h1>
+        <p class="subtitle">Connect your avatars with n8n, Make, and custom applications</p>
+
+        <h2>📋 Table of Contents</h2>
+        <ul>
+            <li><a href="#authentication" style="color: #a78bfa;">Authentication</a></li>
+            <li><a href="#endpoints" style="color: #a78bfa;">API Endpoints</a></li>
+            <li><a href="#n8n-integration" style="color: #a78bfa;">n8n Integration</a></li>
+            <li><a href="#error-handling" style="color: #a78bfa;">Error Handling</a></li>
+        </ul>
+
+        <h2 id="authentication">🔑 Authentication</h2>
+
+        <div class="note">
+            <strong>API Key Authentication:</strong> All API requests require an API key in the request headers.
+        </div>
+
+        <p>To authenticate your requests:</p>
+        <ol>
+            <li>Go to <strong>API Keys</strong> page in your AvatarLab dashboard</li>
+            <li>Click <strong>Create API Key</strong></li>
+            <li>Configure permissions and scope (specific avatar or all avatars)</li>
+            <li>Copy your API key (you'll only see it once!)</li>
+        </ol>
+
+        <p><strong>Include the API key in all requests:</strong></p>
+        <pre><code>x-api-key: pk_live_your_api_key_here</code></pre>
+
+        <div class="warning">
+            <strong>⚠️ Security Warning:</strong> Keep your API keys secret! Never commit them to version control or share them publicly.
+        </div>
+
+        <h2 id="endpoints">🌐 API Endpoints</h2>
+
+        <h3>Base URL</h3>
+        <pre><code>https://your-project-id.supabase.co/functions/v1</code></pre>
+
+        <!-- Avatar Chat Endpoint -->
+        <div class="endpoint">
+            <h3>
+                <span class="method post">POST</span>
+                <span class="url">/avatar-chat</span>
+            </h3>
+            <p>Send a message to an avatar and get a response. Includes RAG knowledge base, memories, and trained prompt versions.</p>
+
+            <h4>Request Headers</h4>
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>Header</th>
+                        <th>Value</th>
+                        <th>Required</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>x-api-key</code></td>
+                        <td>Your platform API key</td>
+                        <td><span class="badge required">Required</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>Content-Type</code></td>
+                        <td>application/json</td>
+                        <td><span class="badge required">Required</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>Request Body</h4>
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                        <th>Required</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>avatar_id</code></td>
+                        <td>string (UUID)</td>
+                        <td>The ID of the avatar to chat with</td>
+                        <td><span class="badge required">Required</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>message</code></td>
+                        <td>string</td>
+                        <td>The user's message</td>
+                        <td><span class="badge required">Required</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>conversation_history</code></td>
+                        <td>array</td>
+                        <td>Previous messages for context (max 30)</td>
+                        <td><span class="badge optional">Optional</span></td>
+                    </tr>
+                    <tr>
+                        <td><code>model</code></td>
+                        <td>string</td>
+                        <td>OpenAI model (default: gpt-3.5-turbo)</td>
+                        <td><span class="badge optional">Optional</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>Example Request</h4>
+            <pre><code>{
+  "avatar_id": "123e4567-e89b-12d3-a456-426614174000",
+  "message": "Tell me about your background",
+  "conversation_history": [
+    {
+      "role": "user",
+      "content": "Hello!"
+    },
+    {
+      "role": "assistant",
+      "content": "Hi! How can I help you today?"
+    }
+  ],
+  "model": "gpt-4o-mini"
+}</code></pre>
+
+            <h4>Example Response</h4>
+            <pre><code>{
+  "success": true,
+  "avatar_id": "123e4567-e89b-12d3-a456-426614174000",
+  "message": "I grew up in Malaysia and developed a passion for technology...",
+  "metadata": {
+    "model": "gpt-4o-mini",
+    "knowledge_chunks_used": 3,
+    "memories_accessed": 5
+  }
+}</code></pre>
+        </div>
+
+        <!-- Avatar Config Endpoint -->
+        <div class="endpoint">
+            <h3>
+                <span class="method get">GET</span>
+                <span class="url">/avatar-config?avatar_id={id}</span>
+            </h3>
+            <p>Get avatar configuration including prompt versions, personality, knowledge base info, and memories count.</p>
+
+            <h4>Request Headers</h4>
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>Header</th>
+                        <th>Value</th>
+                        <th>Required</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>x-api-key</code></td>
+                        <td>Your platform API key</td>
+                        <td><span class="badge required">Required</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>Query Parameters</h4>
+            <table class="param-table">
+                <thead>
+                    <tr>
+                        <th>Parameter</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                        <th>Required</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>avatar_id</code></td>
+                        <td>string (UUID)</td>
+                        <td>The ID of the avatar</td>
+                        <td><span class="badge required">Required</span></td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h4>Example Request</h4>
+            <pre><code>GET /avatar-config?avatar_id=123e4567-e89b-12d3-a456-426614174000
+x-api-key: pk_live_your_api_key_here</code></pre>
+
+            <h4>Example Response</h4>
+            <pre><code>{
+  "success": true,
+  "avatar": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "name": "Sarah",
+    "description": "A friendly AI assistant",
+    "personality_traits": ["friendly", "helpful", "curious"],
+    "backstory": "I grew up in Malaysia...",
+    "mbti_type": "ENFP"
+  },
+  "active_prompt": {
+    "version_number": 3,
+    "system_prompt": "You are Sarah, a friendly AI...",
+    "personality_traits": ["empathetic", "creative"],
+    "is_active": true
+  },
+  "knowledge_base": {
+    "files_count": 5,
+    "files": [
+      {
+        "id": "file-123",
+        "name": "company_handbook.pdf",
+        "type": "application/pdf",
+        "status": "processed"
+      }
+    ]
+  },
+  "memories": {
+    "count": 42
+  }
+}</code></pre>
+        </div>
+
+        <h2 id="n8n-integration">🔗 n8n Integration Guide</h2>
+
+        <div class="success">
+            <strong>Quick Setup:</strong> Follow these steps to connect your avatar with n8n and WhatsApp
+        </div>
+
+        <h3>Step 1: Get Your API Key</h3>
+        <ol>
+            <li>Login to AvatarLab</li>
+            <li>Navigate to <strong>API Keys</strong> page</li>
+            <li>Click <strong>Create API Key</strong></li>
+            <li>Name it (e.g., "n8n WhatsApp Bot")</li>
+            <li>Select the avatar you want to connect</li>
+            <li>Choose permissions: <code>chat</code>, <code>config</code></li>
+            <li>Copy your API key</li>
+        </ol>
+
+        <h3>Step 2: Create n8n Workflow</h3>
+        <ol>
+            <li><strong>Trigger Node:</strong> WhatsApp Trigger (or any trigger you prefer)</li>
+            <li><strong>HTTP Request Node:</strong> Configure as follows:
+                <ul>
+                    <li><strong>Method:</strong> POST</li>
+                    <li><strong>URL:</strong> <code>https://your-project.supabase.co/functions/v1/avatar-chat</code></li>
+                    <li><strong>Authentication:</strong> None (use header instead)</li>
+                    <li><strong>Headers:</strong>
+                        <ul>
+                            <li><code>x-api-key</code>: Your API key</li>
+                            <li><code>Content-Type</code>: application/json</li>
+                        </ul>
+                    </li>
+                    <li><strong>Body:</strong>
+<pre><code>{
+  "avatar_id": "your-avatar-id",
+  "message": "{{ $json.message }}",
+  "conversation_history": []
+}</code></pre>
+                    </li>
+                </ul>
+            </li>
+            <li><strong>WhatsApp Response Node:</strong> Send the response back:
+                <ul>
+                    <li><strong>Message:</strong> <code>{{ $json.message }}</code></li>
+                </ul>
+            </li>
+        </ol>
+
+        <h3>Step 3: Test Your Workflow</h3>
+        <ol>
+            <li>Activate your n8n workflow</li>
+            <li>Send a WhatsApp message to your trigger number</li>
+            <li>Your avatar will respond using its personality, knowledge base, and memories!</li>
+        </ol>
+
+        <div class="note">
+            <strong>💡 Pro Tip:</strong> Store conversation history in a database to maintain context across multiple messages. Use n8n's built-in database nodes or external services like Redis.
+        </div>
+
+        <h2 id="error-handling">⚠️ Error Handling</h2>
+
+        <h3>HTTP Status Codes</h3>
+        <table class="param-table">
+            <thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>200</code></td>
+                    <td>Success</td>
+                </tr>
+                <tr>
+                    <td><code>400</code></td>
+                    <td>Bad Request - Missing required parameters</td>
+                </tr>
+                <tr>
+                    <td><code>401</code></td>
+                    <td>Unauthorized - Invalid or missing API key</td>
+                </tr>
+                <tr>
+                    <td><code>403</code></td>
+                    <td>Forbidden - API key lacks permission</td>
+                </tr>
+                <tr>
+                    <td><code>404</code></td>
+                    <td>Not Found - Avatar doesn't exist</td>
+                </tr>
+                <tr>
+                    <td><code>500</code></td>
+                    <td>Internal Server Error</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Error Response Format</h3>
+        <pre><code>{
+  "error": "Detailed error message here"
+}</code></pre>
+
+        <h3>Common Errors</h3>
+
+        <h4>Missing API Key</h4>
+        <pre><code>{
+  "error": "Missing API key. Include x-api-key header."
+}</code></pre>
+
+        <h4>Invalid API Key</h4>
+        <pre><code>{
+  "error": "Invalid or inactive API key"
+}</code></pre>
+
+        <h4>Permission Denied</h4>
+        <pre><code>{
+  "error": "API key does not have chat permission"
+}</code></pre>
+
+        <h4>Avatar Not Found</h4>
+        <pre><code>{
+  "error": "Avatar not found"
+}</code></pre>
+
+        <div class="warning">
+            <strong>⚠️ Rate Limiting:</strong> API keys are monitored for usage. Excessive requests may be throttled. Contact support if you need higher limits.
+        </div>
+
+        <hr style="border: 1px solid #334155; margin: 40px 0;">
+
+        <p style="text-align: center; color: #94a3b8;">
+            <strong>Need Help?</strong> Contact support or check the <a href="https://github.com/your-repo" style="color: #a78bfa;">GitHub Repository</a>
+        </p>
+    </div>
+</body>
+</html>

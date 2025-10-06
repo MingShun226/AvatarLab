@@ -1,0 +1,690 @@
+{
+  "name": "AvatarLab WhatsApp Chatbot",
+  "nodes": [
+    {
+      "parameters": {
+        "public": true,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        704,
+        -400
+      ],
+      "id": "ce5cdfef-9847-45fd-824c-2059dbf0a91d",
+      "name": "When chat message received",
+      "webhookId": "8488767b-e0b4-4e63-a7dc-88fdff63a825"
+    },
+    {
+      "parameters": {
+        "url": "https://xatrtqdgghanwdujyhkq.supabase.co/functions/v1/avatar-config?avatar_id=9a567d58-cb5b-497d-869a-d6a8d61a8b4e",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhhdHJ0cWRnZ2hhbndkdWp5aGtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg5NjE1MzEsImV4cCI6MjA3NDUzNzUzMX0.sniz2dGyadAa3BvZJ2Omi6thtVWuqMjTFFdM1H_zWAA"
+            },
+            {
+              "name": "x-api-key",
+              "value": "pk_live_58b623706a553414cf54529e0f09415a2195299094e6dde3885013a8ed0e3ceb"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3184,
+        -384
+      ],
+      "id": "470e5fad-bcd0-40d8-ba74-815aa773ff4c",
+      "name": "get_config"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Message Processor with Better Session Management\nconst inputData = $input.first().json;\n\n// Extract message details\nlet userMessage = '';\nlet userId = '';\nlet phone = '';\nlet messageType = 'text';\n\n// Handle different input formats\nif (inputData.chatInput) {\n  userMessage = inputData.chatInput;\n  userId = inputData.contact?.id || inputData.userId || 'anonymous';\n  phone = inputData.contact?.phone || inputData.phone || '';\n} else if (inputData.message) {\n  userMessage = inputData.message.content || inputData.message;\n  messageType = inputData.message.type || 'text';\n  userId = inputData.contact?.id || 'anonymous';\n  phone = inputData.contact?.phone || '';\n}\n\n// Clean and validate inputs\nuserMessage = String(userMessage || '').trim();\nuserId = String(userId || 'anonymous');\nphone = String(phone || '').replace(/\\D/g, ''); // Remove non-digits from phone\n\n// Use phone as primary identifier, fallback to userId if no phone\nconst primaryId = phone || userId || 'anonymous';\n\n// Generate session ID - Daily sessions (kept for backward compatibility)\nconst today = new Date().toISOString().split('T')[0];\nconst sessionId = `${primaryId}_${today}`;\n\n// Generate unique conversation ID with timestamp for precise ordering\nconst now = new Date();\nconst timestamp = now.getTime();\nconst conversationId = `conv_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;\n\n// Create a message ID that includes timestamp for sorting\nconst messageId = `msg_${timestamp}_${primaryId}`;\n\n// Calculate message number for today (for context)\nconst todayStart = new Date();\ntodayStart.setHours(0, 0, 0, 0);\nconst messageTimestamp = now.getTime();\n\nreturn {\n  json: {\n    // Core message data\n    userMessage: userMessage,\n    userId: userId,\n    phone: phone,\n    primaryId: primaryId,\n    messageType: messageType,\n    sessionId: sessionId,\n    conversationId: conversationId,\n    messageId: messageId,\n    \n    // Timestamp data for proper ordering\n    timestamp: now.toISOString(),\n    timestampMillis: timestamp,\n    date: today,\n    time: now.toTimeString().split(' ')[0], // HH:MM:SS\n    \n    // Metadata\n    hasMessage: !!userMessage,\n    hasPhone: !!phone,\n    \n    // For AI Agent context with time info\n    aiContext: {\n      user_phone: phone,\n      primary_id: primaryId,\n      current_message: userMessage,\n      session_id: sessionId,\n      message_timestamp: now.toISOString(),\n      conversation_id: conversationId,\n      message_id: messageId,\n      time_of_day: now.getHours() < 12 ? 'morning' : \n                   now.getHours() < 17 ? 'afternoon' : \n                   now.getHours() < 20 ? 'evening' : 'night'\n    },\n    \n    // Original data for debugging\n    originalData: inputData\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        -384
+      ],
+      "id": "0d6366ee-b119-4257-b8bd-33f555c4eeae",
+      "name": "Message Processor"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.mediaUrl }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1424,
+        -608
+      ],
+      "id": "1c918a29-0bf8-49d4-8c30-41bebdb0c604",
+      "name": "Get Audio"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get the input data\nconst inputData = $input.first().json;\n\n// Create a deep copy of the input data\nconst modifiedData = JSON.parse(JSON.stringify(inputData));\n\n// Function to replace localhost URL with bot.creatiqai.com\nfunction replaceMediaUrl(url) {\n  if (url && url.includes('http://localhost:9000')) {\n    return url.replace('http://localhost:9000', 'https://bot.creatiqai.com');\n  }\n  return url;\n}\n\n// Replace media URL if it exists\nif (modifiedData.media && modifiedData.media.url) {\n  modifiedData.media.url = replaceMediaUrl(modifiedData.media.url);\n}\n\n// Also add a direct access field for convenience\nconst mediaUrl = modifiedData.media ? modifiedData.media.url : null;\nconst mediaType = modifiedData.media ? modifiedData.media.type : null;\n\n// Return the modified data with additional fields for easy access\nreturn [\n{\n  ...modifiedData,\n  // Add convenient access fields\n  mediaUrl: mediaUrl,\n  mediaType: mediaType,\n  originalUrl: inputData.media ? inputData.media.url : null, // Keep original for reference\n  // Add message content for easy access\n  messageContent: inputData.message ? inputData.message.content : null,\n  messageType: inputData.messageType || null\n}\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        928,
+        -400
+      ],
+      "id": "a448c772-cdfa-4ed5-9558-13293181dfcf",
+      "name": "Code5"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "373ad437-deba-4536-9b28-8504ad114bd2",
+              "leftValue": "={{ $json.message.type }}",
+              "rightValue": "audio",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1136,
+        -400
+      ],
+      "id": "6747411a-304f-4818-ab75-d59e6fc6441d",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Format Output - Handle both audio transcription and direct text with language detection\nconst inputData = $input.first().json;\nlet chatInput = '';\nlet messageSource = '';\nlet phoneNumber = '';\nlet detectedLanguage = 'unknown';\n\nconsole.log('=== Enhanced Format Output Debug ===');\nconsole.log('Input data keys:', Object.keys(inputData));\n\n// Simple language detection function\nfunction detectLanguage(text) {\n  if (!text) return 'unknown';\n  \n  // Check for Chinese characters\n  const chineseRegex = /[\\u4e00-\\u9fff\\u3400-\\u4dbf\\uf900-\\ufaff]/;\n  if (chineseRegex.test(text)) {\n    return 'chinese';\n  }\n  \n  // Check for Malay/Indonesian common words\n  const malayWords = ['saya', 'anda', 'dengan', 'untuk', 'adalah', 'yang', 'ini', 'itu', 'pada', 'dari'];\n  const lowerText = text.toLowerCase();\n  if (malayWords.some(word => lowerText.includes(word))) {\n    return 'malay';\n  }\n  \n  // Default to English if no specific patterns found\n  return 'english';\n}\n\n// Determine the source and extract appropriate data\nif (inputData.text && typeof inputData.text === 'string') {\n  // This is from OpenAI5 (audio transcription)\n  chatInput = inputData.text.trim();\n  messageSource = 'audio_transcribed';\n  detectedLanguage = detectLanguage(chatInput);\n  \n  console.log('Source: Audio transcription');\n  console.log('Transcribed text:', chatInput);\n  console.log('Detected language:', detectedLanguage);\n  \n  // For audio messages, get contact info from the original trigger\n  try {\n    const triggerData = $('When chat message received').first().json;\n    phoneNumber = triggerData.contact?.phone || triggerData.phone || '';\n    console.log('Phone from trigger (audio):', phoneNumber);\n  } catch (e) {\n    console.log('Could not access trigger data for audio:', e.message);\n    phoneNumber = '';\n  }\n  \n} else if (inputData.chatInput) {\n  // This is from Code5 (direct text message)\n  chatInput = inputData.chatInput;\n  messageSource = inputData.messageSource || 'text';\n  phoneNumber = inputData.phone || '';\n  detectedLanguage = detectLanguage(chatInput);\n  \n  console.log('Source: Direct text from Code5');\n  console.log('Detected language:', detectedLanguage);\n  \n} else {\n  // Fallback extraction\n  console.log('Using fallback extraction');\n  \n  if (inputData.message?.content) {\n    chatInput = inputData.message.content;\n  } else if (inputData.contact?.message) {\n    chatInput = inputData.contact.message;\n  } else if (typeof inputData === 'string') {\n    chatInput = inputData;\n  } else {\n    try {\n      const triggerData = $('When chat message received').first().json;\n      chatInput = triggerData.chatInput || triggerData.message?.content || 'Hello';\n      phoneNumber = triggerData.contact?.phone || triggerData.phone || '';\n      console.log('Using trigger data as fallback');\n    } catch (e) {\n      console.log('Could not access trigger data:', e.message);\n      chatInput = 'Hello';\n    }\n  }\n  \n  messageSource = 'fallback';\n  detectedLanguage = detectLanguage(chatInput);\n}\n\n// Clean up the message\nchatInput = String(chatInput || 'Hello').trim();\n\n// If we still don't have phone number, try to get it from trigger\nif (!phoneNumber) {\n  try {\n    const triggerData = $('When chat message received').first().json;\n    phoneNumber = triggerData.contact?.phone || triggerData.phone || '';\n    console.log('Phone from trigger (fallback):', phoneNumber);\n  } catch (e) {\n    console.log('Could not get phone from trigger:', e.message);\n    phoneNumber = '';\n  }\n}\n\n// Generate contact info\nconst contact = {\n  id: phoneNumber ? phoneNumber.replace(/\\D/g, '') : 'anonymous',\n  phone: phoneNumber\n};\n\nconsole.log('=== Enhanced Format Output Results ===');\nconsole.log('Final chatInput:', chatInput);\nconsole.log('Message source:', messageSource);\nconsole.log('Phone number:', phoneNumber);\nconsole.log('Detected language:', detectedLanguage);\nconsole.log('Has text:', !!chatInput);\n\n// Return standardized format with language information\nreturn {\n  json: {\n    chatInput: chatInput,\n    contact: contact,\n    phone: phoneNumber,\n    messageType: messageSource,\n    detectedLanguage: detectedLanguage,\n    isMediaMessage: messageSource === 'audio_transcribed',\n    sessionId: `conv_${Date.now()}_${contact.id}`,\n    timestamp: new Date().toISOString(),\n    \n    // Language context for the AI to maintain consistency\n    languageContext: {\n      inputLanguage: detectedLanguage,\n      shouldReplyInSameLanguage: true,\n      isAudioTranscription: messageSource === 'audio_transcribed'\n    },\n    \n    // Debug information\n    debug: {\n      source: messageSource,\n      hasText: !!chatInput,\n      hasPhone: !!phoneNumber,\n      detectedLanguage: detectedLanguage,\n      inputKeys: Object.keys(inputData),\n      processingComplete: true\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1936,
+        -384
+      ],
+      "id": "a6c00f94-7b40-44fa-9502-073db451020e",
+      "name": "Format Output"
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        1664,
+        -608
+      ],
+      "id": "0774711d-24a4-479d-9c62-99667fa2d35f",
+      "name": "Transcribe a recording",
+      "credentials": {
+        "openAiApi": {
+          "id": "5HLXljL3CNZANdI4",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        3632,
+        -128
+      ],
+      "id": "f062e655-ba97-4520-a6d2-fa5ece2fd90c",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "5HLXljL3CNZANdI4",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simplified Conversation Summarizer - Include current message in history\nconst allItems = $input.all();\n\n// Get current message and phone from Message Processor\nlet userPhone = '';\nlet currentMessage = '';\ntry {\n  const currentMessageData = $('Message Processor').first().json;\n  userPhone = currentMessageData.phone || currentMessageData.primaryId || '';\n  currentMessage = currentMessageData.userMessage || '';\n} catch (e) {\n  userPhone = '';\n  currentMessage = '';\n}\n\n// Extract all past conversation data\nlet conversationHistoryArray = [];\nallItems.forEach((item) => {\n  const data = item.json;\n  if (data.conversation_content && data.created_at) {\n    conversationHistoryArray.push(data);\n  }\n});\n\n// Sort past conversations by timestamp (oldest first)\nconst sortedPastConversations = conversationHistoryArray\n  .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))\n  .map((item, index) => ({\n    text: item.conversation_content,\n    timestamp: item.created_at,\n    order: index + 1\n  }));\n\n// Add current message as the latest conversation\nconst allConversations = [...sortedPastConversations];\nif (currentMessage) {\n  allConversations.push({\n    text: `user: ${currentMessage}`,\n    timestamp: new Date().toISOString(),\n    order: sortedPastConversations.length + 1\n  });\n}\n\n// Return clean output with current message included\nreturn {\n  json: {\n    phone: userPhone,\n    conversationHistory: allConversations,\n    totalConversations: allConversations.length,\n    currentMessage: currentMessage\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2944,
+        -384
+      ],
+      "id": "3852b6ab-b901-488f-a60b-e543ff71c191",
+      "name": "Conversation Summarizer"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Final Response - Return only clean text without URLs\nconst data = $('Format Conversation for Storage').first().json;\n\n// Get the clean text message (URLs already removed)\nlet message = data.text_message || '';\n\n// Return clean output\nreturn {\n  json: {\n    output: message.trim()\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5024,
+        -368
+      ],
+      "id": "f4127eb5-a789-473d-a5b1-65da56bc096a",
+      "name": "Final Response"
+    },
+    {
+      "parameters": {
+        "url": "https://xatrtqdgghanwdujyhkq.supabase.co/functions/v1/avatar-conversations",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "avatar_id",
+              "value": "9a567d58-cb5b-497d-869a-d6a8d61a8b4e"
+            },
+            {
+              "name": "phone_number",
+              "value": "={{ $('Message Processor').item.json.phone }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhhdHJ0cWRnZ2hhbndkdWp5aGtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg5NjE1MzEsImV4cCI6MjA3NDUzNzUzMX0.sniz2dGyadAa3BvZJ2Omi6thtVWuqMjTFFdM1H_zWAA"
+            },
+            {
+              "name": "x-api-key",
+              "value": "pk_live_58b623706a553414cf54529e0f09415a2195299094e6dde3885013a8ed0e3ceb"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        -384
+      ],
+      "id": "305e8053-a8eb-4056-b398-cb6b303d2198",
+      "name": "Get Conversation Memory"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://xatrtqdgghanwdujyhkq.supabase.co/functions/v1/avatar-conversations",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhhdHJ0cWRnZ2hhbndkdWp5aGtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg5NjE1MzEsImV4cCI6MjA3NDUzNzUzMX0.sniz2dGyadAa3BvZJ2Omi6thtVWuqMjTFFdM1H_zWAA"
+            },
+            {
+              "name": "x-api-key",
+              "value": "pk_live_58b623706a553414cf54529e0f09415a2195299094e6dde3885013a8ed0e3ceb"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "avatar_id",
+              "value": "={{ $('Format Conversation for Storage').item.json.avatar_id }}"
+            },
+            {
+              "name": "phone_number",
+              "value": "={{ $('Format Conversation for Storage').item.json.phone_number }}"
+            },
+            {
+              "name": "user_message",
+              "value": "={{ $json.user_message }}"
+            },
+            {
+              "name": "assistant_message",
+              "value": "={{ $json.assistant_message }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4304,
+        -384
+      ],
+      "id": "e5ed47b9-c6db-410a-8eff-ae821b2d2365",
+      "name": "Store Conversation"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=User current message: {{ $('Build Complete Context').item.json.userMessage }}\n\nWhile below are the conversations history:\n{{ JSON.stringify($('Get Conversation Memory').item.json.conversationHistory, null, 2) }}",
+        "options": {
+          "systemMessage": "={{ $('Build Complete Context').item.json.fullSystemPrompt }}\n\nTools and Usage:\nPlease always use the get_info tool to get all the info that previously stored in the memory of this avatar, for example knowledgebase, memory images or details, and maybe some description of the avatar.\n\nWhile below are the conversations history:\n{{ JSON.stringify($('Get Conversation Memory').item.json.conversationHistory, null, 2) }}\n\n************************************************************************\nMake sure DO NOT Repeat same thing within the conversation history unless the user asked about it.\nMake sure DO NOT Repeat same thing within the conversation history unless the user asked about it.\nMake sure DO NOT Repeat same thing within the conversation history unless the user asked about it.\n\nRemember:\nUse || to split every message sentences. This is very important to behave as a human replying to others.\nNo need too desire to say many things. like if the conversation should be like normal no need say too many things, just keep 1-2 sentences is enough.\n************************************************************************\n\n=== IMAGE CAPTION FORMATTING ===\nWhen sending images, receipts, photos, or any media:\n- Format your response in TWO parts separated by \" |CAPTION| \"\n- Part 1 (before |CAPTION|): Your main conversational message (DO NOT include the URL here)\n- Part 2 (after |CAPTION|): The image URL in parentheses, followed by a short caption (5-10 words)\n\nExample format:\n\"Sure! Here's the receipt from our dinner at the Japanese place 😊 |CAPTION| (https://storage.example.com/receipt.jpg) Receipt from Japanese restaurant dinner\"\n\nExample format 2:\n\"No problem! Let me send you that photo again. We had such a great time! |CAPTION| (https://example.com/photo.jpg) Dinner party photo\"\n\nRules:\n- CRITICAL: Main message (Part 1) should NOT contain any URLs or \"Here's the link\" phrases\n- Always use \" |CAPTION| \" as the separator (with spaces)\n- Part 2 must start with the URL in parentheses (https://...)\n- Keep captions short and descriptive\n- Main message should feel natural and conversational\n\nIf NOT sending any media, don't use |CAPTION| at all - just respond normally.\n=== END IMAGE CAPTION FORMATTING ==="
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2.2,
+      "position": [
+        3696,
+        -384
+      ],
+      "id": "743d0441-6e10-4a10-97ce-19ee0580476d",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Complete Context for AI Agent\n// Combines: System Prompt + Conversation History + Memories + Knowledge Base\n\nconst avatarConfig = $('get_config').first().json;\nconst conversationSummary = $('Conversation Summarizer').first().json;\nconst messageProcessor = $('Message Processor').first().json;\n\n// Start with base system prompt\nlet fullSystemPrompt = avatarConfig.active_prompt.system_prompt || 'You are a helpful AI assistant.';\n\n// Add avatar personality details\nif (avatarConfig.avatar) {\n  fullSystemPrompt += '\\n\\n=== YOUR IDENTITY ===\\n';\n  fullSystemPrompt += `Name: ${avatarConfig.avatar.name}\\n`;\n  if (avatarConfig.avatar.description) {\n    fullSystemPrompt += `Description: ${avatarConfig.avatar.description}\\n`;\n  }\n  if (avatarConfig.avatar.personality_traits && avatarConfig.avatar.personality_traits.length > 0) {\n    fullSystemPrompt += `Personality: ${avatarConfig.avatar.personality_traits.join(', ')}\\n`;\n  }\n}\n\n// Add conversation history\nif (conversationSummary.conversationHistory && conversationSummary.conversationHistory.length > 0) {\n  fullSystemPrompt += '\\n\\n=== PREVIOUS CONVERSATION HISTORY ===\\n';\n  fullSystemPrompt += 'This is your conversation history with this user. Reference it naturally:\\n\\n';\n\n  conversationSummary.conversationHistory.forEach((conv, index) => {\n    fullSystemPrompt += `${conv.text}\\n`;\n    if (index < conversationSummary.conversationHistory.length - 1) {\n      fullSystemPrompt += ' || ';\n    }\n  });\n\n  fullSystemPrompt += '\\n\\n=== END CONVERSATION HISTORY ===\\n';\n  fullSystemPrompt += 'Continue the conversation naturally based on this history. Maintain context and consistency.\\n';\n}\n\n// Add knowledge base chunks\nif (avatarConfig.knowledge_base && avatarConfig.knowledge_base.chunks && avatarConfig.knowledge_base.chunks.length > 0) {\n  fullSystemPrompt += '\\n\\n=== KNOWLEDGE BASE ===\\n';\n  fullSystemPrompt += 'You have access to the following information. Use it to answer questions accurately:\\n\\n';\n\n  avatarConfig.knowledge_base.chunks.forEach((chunk, index) => {\n    if (chunk.section_title) {\n      fullSystemPrompt += `\\n[Section: ${chunk.section_title}`;\n      if (chunk.page_number) {\n        fullSystemPrompt += ` - Page ${chunk.page_number}`;\n      }\n      fullSystemPrompt += ']\\n';\n    }\n    fullSystemPrompt += `${chunk.content}\\n\\n`;\n  });\n\n  fullSystemPrompt += '=== END KNOWLEDGE BASE ===\\n';\n  fullSystemPrompt += 'Use this knowledge base to provide accurate, specific answers.\\n';\n}\n\n// Add memories\nif (avatarConfig.memories && avatarConfig.memories.items && avatarConfig.memories.items.length > 0) {\n  fullSystemPrompt += '\\n\\n=== YOUR MEMORIES ===\\n';\n  fullSystemPrompt += 'You have these memories about past experiences. Reference them naturally in conversation:\\n\\n';\n\n  avatarConfig.memories.items.forEach((memory, index) => {\n    fullSystemPrompt += `📅 ${memory.date} - ${memory.title}\\n`;\n    fullSystemPrompt += `Summary: ${memory.summary}\\n`;\n\n    if (memory.location) {\n      fullSystemPrompt += `Location: ${memory.location}\\n`;\n    }\n\n    if (memory.food_items && memory.food_items.length > 0) {\n      fullSystemPrompt += `Food/Drinks: ${memory.food_items.join(', ')}\\n`;\n    }\n\n    if (memory.activities && memory.activities.length > 0) {\n      fullSystemPrompt += `Activities: ${memory.activities.join(', ')}\\n`;\n    }\n\n    if (memory.people_present && memory.people_present.length > 0) {\n      fullSystemPrompt += `People: ${memory.people_present.join(', ')}\\n`;\n    }\n\n    if (memory.conversational_hooks && memory.conversational_hooks.length > 0) {\n      fullSystemPrompt += `How to reference: \"${memory.conversational_hooks[0]}\"\\n`;\n    }\n\n    fullSystemPrompt += '\\n';\n  });\n\n  fullSystemPrompt += '=== END MEMORIES ===\\n';\n  fullSystemPrompt += 'Bring up these memories naturally when the conversation is relevant. Don\\'t force them.\\n';\n}\n\n// Add current context\nfullSystemPrompt += '\\n\\n=== CURRENT CONVERSATION ===\\n';\nfullSystemPrompt += `User phone: ${conversationSummary.phone || 'Unknown'}\\n`;\nfullSystemPrompt += `Current message: ${conversationSummary.currentMessage}\\n`;\nfullSystemPrompt += '=== RESPOND NATURALLY ===\\n';\n\n// Return everything needed for AI Agent\nreturn {\n  json: {\n    fullSystemPrompt: fullSystemPrompt,\n    userMessage: conversationSummary.currentMessage,\n    userPhone: conversationSummary.phone,\n\n    // Context stats for debugging\n    contextStats: {\n      hasConversationHistory: conversationSummary.conversationHistory?.length > 0,\n      conversationCount: conversationSummary.conversationHistory?.length || 0,\n      hasKnowledgeBase: avatarConfig.knowledge_base?.chunks?.length > 0,\n      knowledgeChunks: avatarConfig.knowledge_base?.chunks?.length || 0,\n      hasMemories: avatarConfig.memories?.items?.length > 0,\n      memoriesCount: avatarConfig.memories?.items?.length || 0\n    },\n\n    // For storing conversation later\n    avatarId: '9a567d58-cb5b-497d-869a-d6a8d61a8b4e',\n    phone: conversationSummary.phone\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3456,
+        -384
+      ],
+      "id": "94c62be8-a5f6-4860-b6f4-36259d221490",
+      "name": "Build Complete Context"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Conversation for Storage - Extract media URLs AND captions\nconst context = $('Build Complete Context').first().json;\nconst aiResponseNode = $('AI Agent').first().json;\n\n// Extract user message\nconst userMessage = context.userMessage;\n\n// Extract AI response\nlet assistantMessage = '';\n\nif (aiResponseNode.message && aiResponseNode.message.content) {\n  assistantMessage = aiResponseNode.message.content;\n} else if (aiResponseNode.output) {\n  assistantMessage = aiResponseNode.output;\n} else if (aiResponseNode.text) {\n  assistantMessage = aiResponseNode.text;\n} else if (aiResponseNode.content) {\n  assistantMessage = aiResponseNode.content;\n} else {\n  assistantMessage = JSON.stringify(aiResponseNode);\n}\n\n// Check if message contains caption separator\nconst captionSeparator = ' |CAPTION| ';\nlet textOnly = assistantMessage;\nlet imageCaption = '';\nconst mediaUrls = [];\n\nif (assistantMessage.includes(captionSeparator)) {\n  const parts = assistantMessage.split(captionSeparator);\n  textOnly = parts[0].trim(); // Main message WITHOUT URL\n  \n  if (parts[1]) {\n    const captionPart = parts[1].trim();\n    \n    // Extract URL from caption part: (https://...)\n    const urlRegex = /\\(https?:\\/\\/[^\\)]+\\.(jpg|jpeg|png|gif|webp|mp4|pdf|doc|docx|mp3|aac|ogg)\\)/i;\n    const urlMatch = captionPart.match(urlRegex);\n    \n    if (urlMatch) {\n      const url = urlMatch[0].slice(1, -1); // Remove parentheses\n      \n      // Caption is everything after the URL\n      imageCaption = captionPart.replace(urlMatch[0], '').trim();\n      \n      // Determine media type from extension\n      const ext = url.split('.').pop().toLowerCase();\n      let mediaType = 'document';\n      \n      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {\n        mediaType = 'image';\n      } else if (['mp4', '3gpp'].includes(ext)) {\n        mediaType = 'video';\n      } else if (['mp3', 'aac', 'ogg'].includes(ext)) {\n        mediaType = 'audio';\n      }\n      \n      mediaUrls.push({\n        url: url,\n        type: mediaType,\n        extension: ext,\n        caption: imageCaption || 'Shared media'\n      });\n    }\n  }\n  \n  // Store the original message without caption separator for database\n  assistantMessage = textOnly;\n}\n\n// Clean up text\ntextOnly = textOnly.replace(/\\\\n/g, '\\n'); // Convert escaped newlines\n\nreturn {\n  json: {\n    avatar_id: context.avatarId,\n    phone_number: context.phone,\n    user_message: userMessage,\n    assistant_message: assistantMessage, // Clean message for storage\n    text_message: textOnly, // Text without URLs for WhatsApp\n    media_urls: mediaUrls,\n    has_media: mediaUrls.length > 0,\n    image_caption: imageCaption\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4064,
+        -384
+      ],
+      "id": "23760a6c-6614-45f7-9b31-b0ccd062febf",
+      "name": "Format Conversation for Storage"
+    },
+    {
+      "parameters": {
+        "toolDescription": "To get all information from my avatar, for example system prompt, background story, personalities, knowledge base and memories.",
+        "url": "https://xatrtqdgghanwdujyhkq.supabase.co/functions/v1/avatar-config?avatar_id=9a567d58-cb5b-497d-869a-d6a8d61a8b4e",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhhdHJ0cWRnZ2hhbndkdWp5aGtxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTg5NjE1MzEsImV4cCI6MjA3NDUzNzUzMX0.sniz2dGyadAa3BvZJ2Omi6thtVWuqMjTFFdM1H_zWAA"
+            },
+            {
+              "name": "x-api-key",
+              "value": "pk_live_58b623706a553414cf54529e0f09415a2195299094e6dde3885013a8ed0e3ceb"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [
+        3872,
+        -128
+      ],
+      "id": "3e606006-b3ed-4264-bfc7-b0512e831fb9",
+      "name": "get_info"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://bot.creatiqai.com/api/v1/messages/send-media",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer pcp_e5948a6c7f4c43f045849b9e766c482c4cef79e97ff1b657480f1e6446e3484a"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    \"channelId\": 86,\n    \"to\": $('Format Conversation for Storage').item.json.phone_number,\n    \"mediaUrl\": $('Format Conversation for Storage').item.json.media_urls[0]?.url || \"\",\n    \"mediaType\": $('Format Conversation for Storage').item.json.media_urls[0]?.type || \"image\",\n    \"caption\": $('Format Conversation for Storage').item.json.media_urls[0]?.caption || \"\"\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4800,
+        -560
+      ],
+      "id": "68b663eb-7264-4326-88f9-65eeb00f4bc4",
+      "name": "send images"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "14fde037-10af-4fd3-8c1d-0ecdb12e44f1",
+              "leftValue": "={{ $('Format Conversation for Storage').item.json.has_media }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4560,
+        -384
+      ],
+      "id": "27b6c34b-83fc-4316-90d1-d70134102d07",
+      "name": "If1"
+    }
+  ],
+  "pinData": {
+    "When chat message received": [
+      {
+        "json": {
+          "chatInput": "can u send me the receipt again",
+          "sessionId": "conv_493_contact_2",
+          "messageType": "text",
+          "isMediaMessage": false,
+          "message": {
+            "content": "can u send me the receipt again",
+            "type": "text",
+            "timestamp": "2025-10-06T17:49:52.362Z"
+          },
+          "contact": {
+            "id": 2,
+            "name": "MS",
+            "phone": "60165230268",
+            "email": ""
+          },
+          "conversation": {
+            "id": 493
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Code5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_config": {
+      "main": [
+        [
+          {
+            "node": "Build Complete Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message Processor": {
+      "main": [
+        [
+          {
+            "node": "Get Conversation Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Audio": {
+      "main": [
+        [
+          {
+            "node": "Transcribe a recording",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code5": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Get Audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Output": {
+      "main": [
+        [
+          {
+            "node": "Message Processor",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe a recording": {
+      "main": [
+        [
+          {
+            "node": "Format Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Conversation Summarizer": {
+      "main": [
+        [
+          {
+            "node": "get_config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Conversation Memory": {
+      "main": [
+        [
+          {
+            "node": "Conversation Summarizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Conversation": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Conversation for Storage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Complete Context": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Conversation for Storage": {
+      "main": [
+        [
+          {
+            "node": "Store Conversation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "get_info": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send images": {
+      "main": [
+        [
+          {
+            "node": "Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "send images",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "ca07bbb7-7502-46c9-a476-70310101e459",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2634913f2f63564c82ce4655d9f40e1dc9c1a1fed88b38602578fc73f31e2a9f"
+  },
+  "id": "SChJCXGEIZDLgVox",
+  "tags": []
+}

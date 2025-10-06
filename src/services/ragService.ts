@@ -19,6 +19,32 @@ export interface SearchResult {
 
 export class RAGService {
 
+  // Calculate cosine similarity between two vectors
+  static calculateCosineSimilarity(vectorA: number[], vectorB: number[]): number {
+    if (vectorA.length !== vectorB.length) {
+      throw new Error('Vectors must have the same length');
+    }
+
+    let dotProduct = 0;
+    let normA = 0;
+    let normB = 0;
+
+    for (let i = 0; i < vectorA.length; i++) {
+      dotProduct += vectorA[i] * vectorB[i];
+      normA += vectorA[i] * vectorA[i];
+      normB += vectorB[i] * vectorB[i];
+    }
+
+    normA = Math.sqrt(normA);
+    normB = Math.sqrt(normB);
+
+    if (normA === 0 || normB === 0) {
+      return 0;
+    }
+
+    return dotProduct / (normA * normB);
+  }
+
   // Chunk text into smaller pieces for better retrieval
   static chunkText(text: string, chunkSize: number = 1000, overlap: number = 200): string[] {
     const chunks: string[] = [];
@@ -147,17 +173,19 @@ export class RAGService {
         }
       }
 
-      // Update the knowledge file status (ignore if columns don't exist yet)
-      try {
-        await supabase
-          .from('avatar_knowledge_files')
-          .update({
-            processing_status: 'processed',
-            extracted_text: documentText.slice(0, 5000) // Store preview
-          })
-          .eq('id', knowledgeFileId);
-      } catch (updateError) {
-        console.warn('Could not update processing status (table may need migration):', updateError);
+      // Update the knowledge file status
+      const { error: updateError } = await supabase
+        .from('avatar_knowledge_files')
+        .update({
+          processing_status: 'processed',
+          extracted_text: documentText.slice(0, 5000) // Store preview
+        })
+        .eq('id', knowledgeFileId);
+
+      if (updateError) {
+        console.error('Error updating file status to processed:', updateError);
+        // Still throw error so processing status shows as error
+        throw new Error(`Failed to update file status: ${updateError.message}`);
       }
 
       console.log(`Successfully processed ${chunks.length} chunks for ${fileName}`);
@@ -165,14 +193,14 @@ export class RAGService {
     } catch (error) {
       console.error('Error processing document:', error);
 
-      // Update file status to error (ignore if columns don't exist yet)
-      try {
-        await supabase
-          .from('avatar_knowledge_files')
-          .update({ processing_status: 'error' })
-          .eq('id', knowledgeFileId);
-      } catch (updateError) {
-        console.warn('Could not update error status (table may need migration):', updateError);
+      // Update file status to error
+      const { error: errorUpdateError } = await supabase
+        .from('avatar_knowledge_files')
+        .update({ processing_status: 'error' })
+        .eq('id', knowledgeFileId);
+
+      if (errorUpdateError) {
+        console.error('Could not update file status to error:', errorUpdateError);
       }
 
       throw error;
@@ -193,20 +221,80 @@ export class RAGService {
       // Generate embedding for the query
       const queryEmbedding = await this.generateEmbedding(query, userId);
 
-      // Search for similar chunks using the stored function
+      // First, get linked knowledge files
+      const { data: linkedFiles, error: linkedError } = await supabase
+        .from('avatar_knowledge_files')
+        .select('id')
+        .eq('user_id', userId)
+        .eq('avatar_id', avatarId)
+        .eq('is_linked', true)
+        .eq('processing_status', 'processed');
+
+      if (linkedError) {
+        console.error('Error getting linked files:', linkedError);
+        throw linkedError;
+      }
+
+      if (!linkedFiles || linkedFiles.length === 0) {
+        // No linked files, return empty result
+        return {
+          chunks: [],
+          totalFound: 0,
+          searchTime: Date.now() - startTime
+        };
+      }
+
+      const linkedFileIds = linkedFiles.map(f => f.id);
+
+      // Search for similar chunks only from linked files
       const { data: chunks, error } = await supabase
-        .rpc('search_document_chunks', {
-          query_embedding: queryEmbedding,
-          search_user_id: userId,
-          search_avatar_id: avatarId,
-          similarity_threshold: similarityThreshold,
-          match_count: limit
-        });
+        .from('document_chunks')
+        .select(`
+          id,
+          knowledge_file_id,
+          chunk_text,
+          chunk_index,
+          page_number,
+          section_title,
+          embedding
+        `)
+        .in('knowledge_file_id', linkedFileIds)
+        .eq('user_id', userId)
+        .eq('avatar_id', avatarId)
+        .limit(limit * 3); // Get more chunks for similarity calculation
 
       if (error) {
         console.error('Error searching chunks:', error);
         throw error;
       }
+
+      // Calculate similarity scores manually
+      const chunksWithSimilarity = chunks?.map(chunk => {
+        // Parse embedding if it's stored as a string
+        let chunkEmbedding = chunk.embedding;
+        if (typeof chunkEmbedding === 'string') {
+          try {
+            chunkEmbedding = JSON.parse(chunkEmbedding);
+          } catch (error) {
+            console.error('Failed to parse chunk embedding:', error);
+            return null;
+          }
+        }
+
+        // Skip chunks with invalid embeddings
+        if (!Array.isArray(chunkEmbedding) || chunkEmbedding.length === 0) {
+          console.warn('Invalid chunk embedding, skipping chunk:', chunk.id);
+          return null;
+        }
+
+        const similarity = this.calculateCosineSimilarity(queryEmbedding, chunkEmbedding);
+        return {
+          ...chunk,
+          similarity
+        };
+      }).filter(chunk => chunk !== null && chunk.similarity >= similarityThreshold)
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit) || [];
 
       const searchTime = Date.now() - startTime;
 
@@ -218,13 +306,13 @@ export class RAGService {
           avatar_id: avatarId,
           query_text: query,
           query_embedding: queryEmbedding,
-          chunks_found: chunks?.length || 0,
-          top_similarity_score: chunks?.[0]?.similarity || 0
+          chunks_found: chunksWithSimilarity.length,
+          top_similarity_score: chunksWithSimilarity[0]?.similarity || 0
         });
 
       return {
-        chunks: chunks || [],
-        totalFound: chunks?.length || 0,
+        chunks: chunksWithSimilarity,
+        totalFound: chunksWithSimilarity.length,
         searchTime
       };
 

@@ -3,10 +3,15 @@ import { supabase } from '@/integrations/supabase/client';
 import { RAGService } from './ragService';
 import { TrainingService } from './trainingService';
 import { SmartPromptService } from './smartPromptService';
+import { MemoryService } from './memoryService';
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system';
-  content: string;
+  content: string | Array<{
+    type: 'text' | 'image_url';
+    text?: string;
+    image_url?: { url: string; detail?: 'low' | 'high' | 'auto' };
+  }>;
 }
 
 export interface AvatarContext {
@@ -65,9 +70,17 @@ export const chatbotService = {
       // Get basic knowledge base info (for files without RAG processing)
       const knowledgeBase = await this.getKnowledgeBaseContent(userId, avatarContext.id);
 
-      // Create system prompt with RAG-enhanced context and smart patterns
+      // Get avatar memories for context injection
+      const memories = await MemoryService.getRecentMemories(avatarContext.id, userId, 10);
+      const memoryContext = MemoryService.buildMemoryContext(memories);
+
+      // Build memory image references for GPT-4o
+      const memoryImageReferences = await this.buildMemoryImageReferences(memories);
+
+      // Create system prompt with RAG-enhanced context, memories, and smart patterns
       const baseSystemPrompt = await this.createSystemPromptWithRAG(avatarContext, knowledgeBase, ragResults.chunks, message, userId);
-      const systemPrompt = await SmartPromptService.generateSmartPrompt(userId, avatarContext.id, message, baseSystemPrompt);
+      const systemPromptWithMemories = baseSystemPrompt + memoryContext + memoryImageReferences;
+      const systemPrompt = await SmartPromptService.generateSmartPrompt(userId, avatarContext.id, message, systemPromptWithMemories);
 
       // Prepare messages for OpenAI
       const messages: ChatMessage[] = [
@@ -79,7 +92,32 @@ export const chatbotService = {
       // Use fine-tuned model if available
       const modelToUse = avatarContext.fineTunedModelId || model;
 
-      // Call OpenAI API
+      // Define function tools for memory image retrieval
+      const tools = [
+        {
+          type: 'function',
+          function: {
+            name: 'get_memory_images',
+            description: 'Retrieve images from a specific memory to show to the user. Use this when discussing or referencing a specific memory event and you want to share the photos from that memory.',
+            parameters: {
+              type: 'object',
+              properties: {
+                memory_id: {
+                  type: 'string',
+                  description: 'The ID of the memory to retrieve images from'
+                },
+                reason: {
+                  type: 'string',
+                  description: 'Brief explanation of why you want to show this memory'
+                }
+              },
+              required: ['memory_id', 'reason']
+            }
+          }
+        }
+      ];
+
+      // Call OpenAI API with function calling support
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -90,7 +128,9 @@ export const chatbotService = {
           model: modelToUse,
           messages,
           max_tokens: this.getMaxTokensForModel(modelToUse),
-          temperature: 0.7
+          temperature: 0.7,
+          tools: tools,
+          tool_choice: 'auto'
         })
       });
 
@@ -112,7 +152,75 @@ export const chatbotService = {
         throw new Error('Invalid response from OpenAI API');
       }
 
-      const avatarResponse = data.choices[0].message.content;
+      const assistantMessage = data.choices[0].message;
+
+      // Check if the model wants to call a function
+      if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {
+        // Handle function call for retrieving memory images
+        const toolCall = assistantMessage.tool_calls[0];
+
+        if (toolCall.function.name === 'get_memory_images') {
+          const args = JSON.parse(toolCall.function.arguments);
+          const memoryId = args.memory_id;
+
+          // Retrieve memory images
+          const images = await MemoryService.getMemoryImages(memoryId, userId);
+
+          if (images && images.length > 0) {
+            // Add function call and result to messages
+            messages.push({
+              role: 'assistant',
+              content: assistantMessage.content || ''
+            });
+
+            messages.push({
+              role: 'system',
+              content: `Function result: Retrieved ${images.length} image(s) from memory. The images will be automatically displayed to the user. DO NOT include image attachments or markdown image syntax in your response. Just write your message naturally - the photos will appear automatically below your text.`
+            });
+
+            // Make a second API call with the function result
+            const secondResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+              },
+              body: JSON.stringify({
+                model: modelToUse,
+                messages,
+                max_tokens: this.getMaxTokensForModel(modelToUse),
+                temperature: 0.7
+              })
+            });
+
+            if (!secondResponse.ok) {
+              throw new Error('Failed to get final response after function call');
+            }
+
+            const secondData = await secondResponse.json();
+            let finalResponse = secondData.choices[0].message.content;
+
+            // Clean up any attachment references or markdown image syntax
+            finalResponse = this.cleanImageReferences(finalResponse);
+
+            // Return response with image metadata
+            return JSON.stringify({
+              type: 'text_with_images',
+              text: finalResponse,
+              images: images.map(img => ({
+                url: img.image_url,
+                caption: img.caption || '',
+                is_primary: img.is_primary
+              }))
+            });
+          }
+        }
+      }
+
+      let avatarResponse = assistantMessage.content;
+
+      // Clean up any image references from the response
+      avatarResponse = this.cleanImageReferences(avatarResponse);
 
       // Learn from this conversation (async, don't block response)
       SmartPromptService.learnFromConversations(
@@ -316,5 +424,55 @@ Note: I can see this document exists in my knowledge base, but the text content 
     prompt += `\n\nStay in character and respond as ${avatarContext.name} would, based on your personality, background, and available knowledge. Be helpful, engaging, and authentic to your character.`;
 
     return prompt;
+  },
+
+  async buildMemoryImageReferences(memories: any[]): Promise<string> {
+    if (!memories || memories.length === 0) {
+      return '';
+    }
+
+    let imageReferences = '\n\n=== MEMORY PHOTO REFERENCES ===\n';
+    imageReferences += 'You have access to photos from these memories. You can retrieve and show these photos to the user by calling the get_memory_images function:\n\n';
+
+    for (const memory of memories) {
+      if (memory.images && memory.images.length > 0) {
+        imageReferences += `Memory ID: ${memory.id}\n`;
+        imageReferences += `Title: ${memory.title}\n`;
+        imageReferences += `Date: ${memory.memory_date}\n`;
+        imageReferences += `Photos available: ${memory.images.length}\n`;
+        imageReferences += `Description: ${memory.memory_summary}\n`;
+        imageReferences += `---\n`;
+      }
+    }
+
+    imageReferences += '\n**IMPORTANT**: When you call get_memory_images, the photos will be automatically displayed to the user below your message. DO NOT include image markdown syntax like ![](attachment://...) or mention attachments in your text. Just write your message naturally and the images will appear automatically.\n';
+    imageReferences += '=== END MEMORY PHOTO REFERENCES ===\n';
+
+    return imageReferences;
+  },
+
+  cleanImageReferences(text: string): string {
+    if (!text) return text;
+
+    // Remove markdown image syntax: ![alt](url)
+    let cleaned = text.replace(/!\[([^\]]*)\]\([^)]+\)/g, '');
+
+    // Remove standalone attachment references
+    cleaned = cleaned.replace(/attachment:\/\/[a-f0-9-]+/gi, '');
+
+    // Remove lines that only contain image references
+    cleaned = cleaned.split('\n')
+      .filter(line => {
+        const trimmed = line.trim();
+        return trimmed.length > 0 &&
+               !trimmed.startsWith('![') &&
+               !trimmed.match(/^attachment:\/\//i);
+      })
+      .join('\n');
+
+    // Clean up extra whitespace
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
+
+    return cleaned;
   }
 };

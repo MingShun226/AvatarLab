@@ -5,6 +5,17 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import {
   MessageCircle,
   SendHorizontal,
   Bot,
@@ -13,7 +24,8 @@ import {
   AlertTriangle,
   RefreshCw,
   ThumbsUp,
-  ThumbsDown
+  ThumbsDown,
+  Trash2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { chatbotService, ChatMessage, AvatarContext } from '@/services/chatbotService';
@@ -22,10 +34,17 @@ import { apiKeyService } from '@/services/apiKeyService';
 import { TrainingService, PromptVersion } from '@/services/trainingService';
 import { SmartPromptService } from '@/services/smartPromptService';
 
+interface MessageImage {
+  url: string;
+  caption?: string;
+  is_primary?: boolean;
+}
+
 interface Message {
   id: string;
   type: 'user' | 'avatar';
   content: string;
+  images?: MessageImage[]; // Support for image attachments
   timestamp: Date;
   feedback?: 'good' | 'bad' | null;
   userMessage?: string; // Store corresponding user message for avatar responses
@@ -100,14 +119,42 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
     loadVersions();
   }, [user, selectedAvatar]);
 
-  // Initialize chat when avatar changes
+  // Load chat history from localStorage when avatar changes
   useEffect(() => {
-    if (selectedAvatar) {
-      setMessages([]);
-      setConversationHistory([]);
+    if (selectedAvatar && user) {
+      const storageKey = `chat_history_${user.id}_${selectedAvatar.id}`;
+      const savedHistory = localStorage.getItem(storageKey);
+
+      if (savedHistory) {
+        try {
+          const parsed = JSON.parse(savedHistory);
+          setMessages(parsed.messages || []);
+          setConversationHistory(parsed.conversationHistory || []);
+        } catch (error) {
+          console.error('Failed to load chat history:', error);
+          setMessages([]);
+          setConversationHistory([]);
+        }
+      } else {
+        setMessages([]);
+        setConversationHistory([]);
+      }
       setApiError(null);
     }
-  }, [selectedAvatar]);
+  }, [selectedAvatar, user]);
+
+  // Save chat history to localStorage whenever messages change
+  useEffect(() => {
+    if (selectedAvatar && user && messages.length > 0) {
+      const storageKey = `chat_history_${user.id}_${selectedAvatar.id}`;
+      const dataToSave = {
+        messages,
+        conversationHistory,
+        lastUpdated: new Date().toISOString()
+      };
+      localStorage.setItem(storageKey, JSON.stringify(dataToSave));
+    }
+  }, [messages, conversationHistory, selectedAvatar, user]);
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim() || isTyping || !user || !selectedAvatar) {
@@ -151,6 +198,7 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
       };
 
       let response: string;
+      let responseImages: MessageImage[] = [];
 
       if (hasApiKey) {
         // Use real OpenAI API with gpt-4o-mini
@@ -161,6 +209,17 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
           conversationHistory,
           'gpt-4o-mini'
         );
+
+        // Check if response contains image data (JSON format)
+        try {
+          const parsed = JSON.parse(response);
+          if (parsed.type === 'text_with_images') {
+            response = parsed.text;
+            responseImages = parsed.images || [];
+          }
+        } catch {
+          // Not JSON, treat as regular text response
+        }
       } else {
         // Use mock response when no API key
         const mockResponses = [
@@ -177,6 +236,7 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
         id: (Date.now() + 1).toString(),
         type: 'avatar',
         content: response,
+        images: responseImages.length > 0 ? responseImages : undefined,
         timestamp: new Date(),
         feedback: null,
         userMessage: messageContent
@@ -218,9 +278,21 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
   };
 
   const clearChat = () => {
+    if (!selectedAvatar || !user) return;
+
+    // Clear from localStorage
+    const storageKey = `chat_history_${user.id}_${selectedAvatar.id}`;
+    localStorage.removeItem(storageKey);
+
+    // Clear from state
     setMessages([]);
     setConversationHistory([]);
     setApiError(null);
+
+    toast({
+      title: "Chat Cleared",
+      description: "All messages have been cleared successfully.",
+    });
   };
 
   const formatTime = (date: Date) => {
@@ -362,7 +434,7 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
                   )}
                 </div>
 
-                <div className={`flex-1 space-y-1 ${
+                <div className={`flex-1 space-y-2 ${
                   message.type === 'user' ? 'text-right' : ''
                 }`}>
                   <div className={`inline-block p-3 rounded-lg max-w-[85%] break-words ${
@@ -372,6 +444,31 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
                   }`}>
                     <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                   </div>
+
+                  {/* Display images if present */}
+                  {message.images && message.images.length > 0 && (
+                    <div className={`inline-block max-w-[85%] ${
+                      message.type === 'user' ? 'ml-auto' : ''
+                    }`}>
+                      <div className="grid grid-cols-2 gap-2">
+                        {message.images.map((img, idx) => (
+                          <div key={idx} className="relative group">
+                            <img
+                              src={img.url}
+                              alt={img.caption || 'Memory photo'}
+                              className="rounded-lg w-full h-auto object-cover shadow-md hover:shadow-lg transition-shadow"
+                            />
+                            {img.caption && (
+                              <p className="text-xs text-muted-foreground mt-1 px-1">
+                                {img.caption}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <div className={`flex items-center gap-2 text-xs text-muted-foreground ${
                     message.type === 'user' ? 'justify-end' : 'justify-start'
                   }`}>
@@ -449,14 +546,34 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
                   <SendHorizontal className="h-4 w-4" />
                 )}
               </Button>
-              <Button
-                onClick={clearChat}
-                variant="outline"
-                size="sm"
-                disabled={isTyping}
-              >
-                <RefreshCw className="h-4 w-4" />
-              </Button>
+
+              {/* Clear Chat with Confirmation */}
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={isTyping || messages.length === 0}
+                    title="Clear chat history"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Clear Chat History?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete all messages in this conversation. This action cannot be undone.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={clearChat} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                      Clear All
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
 
             <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">

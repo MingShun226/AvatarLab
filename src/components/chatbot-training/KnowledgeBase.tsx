@@ -15,7 +15,9 @@ import {
   RefreshCw,
   Brain,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Eye,
+  Loader2
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { DeleteConfirmationDialog } from '@/components/ui/delete-confirmation-dialog';
@@ -32,9 +34,10 @@ interface KnowledgeFile {
   linked: boolean;
   uploadedAt: string;
   file?: File;
-  processingStatus?: 'pending' | 'processed' | 'error';
+  processingStatus?: 'pending' | 'processing' | 'processed' | 'error';
   extractedText?: string;
   contentType?: string;
+  filePath?: string;
 }
 
 interface KnowledgeBaseProps {
@@ -48,6 +51,8 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
   const [fileToDelete, setFileToDelete] = useState<KnowledgeFile | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [previewFile, setPreviewFile] = useState<KnowledgeFile | null>(null);
+  const [processingFiles, setProcessingFiles] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const { user } = useAuth();
@@ -86,6 +91,103 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
     };
   }, [avatarId, user]);
 
+  // Auto-process PDF for RAG
+  const processFileForRAG = async (fileId: string, fileName: string) => {
+    try {
+      setProcessingFiles(prev => new Set(prev).add(fileId));
+
+      // Update status to processing (or pending if constraint doesn't allow processing)
+      try {
+        await supabase
+          .from('avatar_knowledge_files')
+          .update({ processing_status: 'processing' })
+          .eq('id', fileId);
+      } catch (constraintError) {
+        // If 'processing' status is not allowed, keep as 'pending'
+        console.warn('Could not set processing status, keeping as pending:', constraintError);
+      }
+
+      // Extract text from PDF using our PDF extractor
+      const { PDFExtractor } = await import('@/utils/pdfExtractor');
+
+      // Get file from storage
+      const { data: fileData } = await supabase
+        .from('avatar_knowledge_files')
+        .select('file_path')
+        .eq('id', fileId)
+        .single();
+
+      if (!fileData?.file_path) {
+        throw new Error('File path not found');
+      }
+
+      // Download file blob
+      const { data: blob, error: downloadError } = await supabase.storage
+        .from('knowledge-base')
+        .download(fileData.file_path);
+
+      if (downloadError) {
+        throw new Error(`Failed to download file: ${downloadError.message}`);
+      }
+
+      // Convert blob to File object
+      const file = new File([blob], fileName, { type: 'application/pdf' });
+
+      // Extract text
+      const extractionResult = await PDFExtractor.extractTextFromFile(file);
+      const extractedText = PDFExtractor.cleanExtractedText(extractionResult.text);
+
+      if (!extractedText || extractedText.trim().length === 0) {
+        throw new Error('No text could be extracted from the PDF');
+      }
+
+      // Process with RAG
+      await RAGService.processDocument(
+        user!.id,
+        avatarId,
+        fileId,
+        extractedText,
+        fileName
+      );
+
+      toast({
+        title: "Processing Complete",
+        description: `${fileName} has been processed and is now available for intelligent responses.`,
+      });
+
+      // Refresh files to show updated status
+      await loadKnowledgeFiles();
+
+    } catch (error) {
+      console.error('Auto-processing error:', error);
+
+      // Update status to error
+      try {
+        await supabase
+          .from('avatar_knowledge_files')
+          .update({ processing_status: 'error' })
+          .eq('id', fileId);
+      } catch (updateError) {
+        console.error('Could not update status to error:', updateError);
+      }
+
+      toast({
+        title: "Processing Failed",
+        description: `Failed to process ${fileName}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        variant: "destructive"
+      });
+
+      // Refresh files to show updated status
+      await loadKnowledgeFiles();
+    } finally {
+      setProcessingFiles(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(fileId);
+        return newSet;
+      });
+    }
+  };
+
   const loadKnowledgeFiles = async () => {
     setIsLoading(true);
     try {
@@ -94,7 +196,7 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
       // Load uploaded knowledge files from database
       const { data: uploadedFiles, error: uploadedError } = await supabase
         .from('avatar_knowledge_files')
-        .select('id, file_name, original_name, file_size, content_type, is_linked, uploaded_at, processing_status, extracted_text')
+        .select('id, file_name, original_name, file_size, content_type, is_linked, uploaded_at, processing_status, extracted_text, file_path')
         .eq('avatar_id', avatarId)
         .eq('user_id', user?.id)
         .order('uploaded_at', { ascending: false });
@@ -115,7 +217,8 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
           uploadedAt: file.uploaded_at,
           processingStatus: file.processing_status || 'pending',
           extractedText: file.extracted_text,
-          contentType: file.content_type
+          contentType: file.content_type,
+          filePath: file.file_path
         }));
       }
 
@@ -214,14 +317,23 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
       });
 
       const results = await Promise.all(uploadPromises);
-      
+
       toast({
         title: "Upload Successful",
-        description: `${results.length} file(s) uploaded successfully and linked to your avatar.`,
+        description: `${results.length} file(s) uploaded successfully. Auto-processing for RAG has started.`,
       });
 
       // Reload knowledge files to show the new uploads
       await loadKnowledgeFiles();
+
+      // Auto-process each uploaded file for RAG
+      results.forEach(async (fileData) => {
+        try {
+          await processFileForRAG(fileData.id, fileData.original_name || fileData.file_name);
+        } catch (error) {
+          console.error(`Failed to auto-process ${fileData.file_name}:`, error);
+        }
+      });
 
     } catch (error) {
       console.error('Upload error:', error);
@@ -336,6 +448,34 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
   const confirmDelete = (file: KnowledgeFile) => {
     setFileToDelete(file);
     setDeleteDialogOpen(true);
+  };
+
+  const handlePreview = async (file: KnowledgeFile) => {
+    try {
+      if (!file.filePath) {
+        throw new Error('File path not found');
+      }
+
+      // Get signed URL for preview
+      const { data: signedUrlData, error } = await supabase.storage
+        .from('knowledge-base')
+        .createSignedUrl(file.filePath, 3600); // 1 hour expiry
+
+      if (error) {
+        throw new Error(error.message);
+      }
+
+      // Open PDF in new window
+      window.open(signedUrlData.signedUrl, '_blank');
+
+    } catch (error) {
+      console.error('Preview error:', error);
+      toast({
+        title: "Preview Failed",
+        description: "Failed to open PDF preview.",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleDelete = async () => {
@@ -501,6 +641,7 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
                             <Badge
                               variant={
                                 file.processingStatus === 'processed' ? "default" :
+                                file.processingStatus === 'processing' ? "secondary" :
                                 file.processingStatus === 'error' ? "destructive" : "outline"
                               }
                               className="text-xs gap-1"
@@ -510,6 +651,11 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
                                   <CheckCircle2 className="h-3 w-3" />
                                   RAG Ready
                                 </>
+                              ) : file.processingStatus === 'processing' || processingFiles.has(file.id) ? (
+                                <>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Processing...
+                                </>
                               ) : file.processingStatus === 'error' ? (
                                 <>
                                   <AlertCircle className="h-3 w-3" />
@@ -518,12 +664,11 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
                               ) : (
                                 <>
                                   <Brain className="h-3 w-3" />
-                                  Needs Processing
+                                  Queued for Processing
                                 </>
                               )}
                             </Badge>
 
-                            <span className="text-xs text-muted-foreground">{file.size}</span>
                             <span className="text-xs text-muted-foreground">
                               {new Date(file.uploadedAt).toLocaleDateString()}
                             </span>
@@ -531,18 +676,14 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
                         </div>
                       </div>
                       <div className="flex gap-1">
-                        {/* RAG Processing Button */}
-                        {file.processingStatus !== 'processed' && (
-                          <ProcessDocumentButton
-                            fileId={file.id}
-                            fileName={file.name}
-                            userId={user?.id || ''}
-                            avatarId={avatarId}
-                            contentType={file.contentType}
-                            onProcessingComplete={loadKnowledgeFiles}
-                          />
-                        )}
-
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handlePreview(file)}
+                          title="Preview PDF"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
@@ -583,14 +724,14 @@ export const KnowledgeBase: React.FC<KnowledgeBaseProps> = ({ avatarId, isTraini
 
             {/* Information */}
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h4 className="font-medium text-blue-900 mb-2">RAG-Enhanced Knowledge Base</h4>
+              <h4 className="font-medium text-blue-900 mb-2">Intelligent Knowledge Base</h4>
               <ul className="text-sm text-blue-800 space-y-1">
-                <li>• <strong>Process for RAG:</strong> Converts PDFs into searchable chunks with AI embeddings</li>
-                <li>• <strong>Link:</strong> Makes processed documents available for semantic search during conversations</li>
-                <li>• <strong>Unlink:</strong> Removes documents from active knowledge without deleting the processing</li>
-                <li>• <strong>RAG Ready:</strong> Documents are fully processed and searchable by your avatar</li>
-                <li>• Only linked and processed documents provide intelligent, context-aware responses</li>
-                <li>• Real-time updates ensure changes are immediately reflected across the system</li>
+                <li>• <strong>Auto-Processing:</strong> PDFs are automatically processed with AI embeddings upon upload</li>
+                <li>• <strong>Preview:</strong> View PDF content directly in your browser</li>
+                <li>• <strong>Smart Linking:</strong> Link/unlink documents to control your avatar's knowledge access</li>
+                <li>• <strong>RAG Ready:</strong> Processed documents enable intelligent, context-aware responses</li>
+                <li>• <strong>Real-time Updates:</strong> Changes are immediately reflected in conversations</li>
+                <li>• Only linked documents are accessible during avatar conversations</li>
               </ul>
             </div>
           </div>

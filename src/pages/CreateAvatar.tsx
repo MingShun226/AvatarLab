@@ -11,6 +11,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges';
 import { useBackNavigation } from '@/hooks/useBackNavigation';
 import { UnsavedChangesDialog } from '@/components/ui/unsaved-changes-dialog';
+import { TrainingService } from '@/services/trainingService';
 
 // Import step components
 import { AvatarDetailStep } from '@/components/avatar-creation/AvatarDetailStep';
@@ -229,6 +230,60 @@ export default function CreateAvatar() {
         }
 
         savedAvatarId = newAvatar.id;
+
+        // Generate initial system prompt from avatar profile
+        try {
+          const systemPrompt = TrainingService.generateBaseSystemPrompt(newAvatar);
+
+          // Update avatar with generated system prompt
+          const { error: promptUpdateError } = await supabase
+            .from('avatars')
+            .update({ system_prompt: systemPrompt })
+            .eq('id', newAvatar.id);
+
+          if (promptUpdateError) {
+            console.error('Failed to save initial system prompt:', promptUpdateError);
+          } else {
+            console.log('Generated initial system prompt for avatar:', newAvatar.name);
+          }
+
+          // Create version 1.0 with the original prompt
+          if (user) {
+            try {
+              await TrainingService.createPromptVersion({
+                avatar_id: newAvatar.id,
+                user_id: user.id,
+                training_data_id: null, // No training data for original version
+                version_number: 'v1.0',
+                version_name: 'Original Avatar Profile',
+                description: 'Initial version generated from avatar profile details',
+                system_prompt: systemPrompt,
+                personality_traits: newAvatar.personality_traits || [],
+                behavior_rules: [], // Will be populated by training
+                response_style: {
+                  formality: 'casual',
+                  emoji_usage: 'minimal',
+                  response_length: 'adaptive',
+                  tone: 'friendly'
+                },
+                is_active: true, // Make this the active version
+                is_published: false,
+                usage_count: 0,
+                rating: null,
+                feedback_notes: null,
+                parent_version_id: null, // Base version
+                changes_from_parent: null,
+                inheritance_type: 'full',
+                base_version_id: null
+              });
+              console.log('Created version 1.0 for avatar:', newAvatar.name);
+            } catch (versionError) {
+              console.error('Failed to create version 1.0:', versionError);
+            }
+          }
+        } catch (error) {
+          console.error('Error generating system prompt:', error);
+        }
 
         // Save knowledge files for new avatar
         if (formData.knowledgeFiles.length > 0) {

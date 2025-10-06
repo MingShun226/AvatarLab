@@ -3,12 +3,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  MessageSquare,
+  MessageCircle,
   AlertCircle,
   Brain,
   BookOpen,
   TestTube,
-  History
+  History,
+  Sparkles
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { SimpleAvatarSelector } from '@/components/chatbot-training/SimpleAvatarSelector';
@@ -16,6 +17,7 @@ import { DatabaseTrainingInterface } from '@/components/chatbot-training/Databas
 import { TestChatSimple } from '@/components/chatbot-training/TestChatSimple';
 import { KnowledgeBase } from '@/components/chatbot-training/KnowledgeBase';
 import { DatabaseVersionControl } from '@/components/chatbot-training/DatabaseVersionControl';
+import { MemoryGallery } from '@/components/chatbot-training/MemoryGallery';
 import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
@@ -126,7 +128,7 @@ const ChatbotSectionClean = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-3">
-            <MessageSquare className="h-6 w-6" />
+            <MessageCircle className="h-6 w-6" />
             Chatbot Training
             {selectedAvatar && (
               <Badge variant="outline" className="text-sm font-normal">
@@ -164,7 +166,7 @@ const ChatbotSectionClean = () => {
         </Card>
       ) : (
         <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-5">
             <TabsTrigger
               value="train"
               disabled={isTraining && activeTab !== 'train'}
@@ -172,6 +174,14 @@ const ChatbotSectionClean = () => {
             >
               <Brain className="h-4 w-4" />
               Train
+            </TabsTrigger>
+            <TabsTrigger
+              value="memories"
+              disabled={isTraining && activeTab !== 'memories'}
+              className="flex items-center gap-2"
+            >
+              <Sparkles className="h-4 w-4" />
+              Memories
             </TabsTrigger>
             <TabsTrigger
               value="knowledge"
@@ -186,7 +196,7 @@ const ChatbotSectionClean = () => {
               disabled={(isTraining && activeTab !== 'test')}
               className="flex items-center gap-2"
             >
-              <TestTube className="h-4 w-4" />
+              <MessageCircle className="h-4 w-4" />
               Chat
             </TabsTrigger>
             <TabsTrigger
@@ -206,6 +216,13 @@ const ChatbotSectionClean = () => {
               isTraining={isTraining}
               onTrainingStart={handleTrainingStart}
               onTrainingComplete={handleTrainingComplete}
+            />
+          </TabsContent>
+
+          <TabsContent value="memories">
+            <MemoryGallery
+              avatarId={selectedAvatar.id}
+              avatarName={selectedAvatar.name}
             />
           </TabsContent>
 

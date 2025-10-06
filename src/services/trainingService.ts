@@ -477,21 +477,29 @@ export class TrainingService {
 
       onProgress?.('Getting current avatar prompt...', 60);
 
-      // Get the latest version's system prompt to build upon (progressive training)
+      // Get the active version's system prompt to build upon (progressive training)
+      // This ensures we always build on top of what's currently being used
       const existingVersions = await this.getPromptVersions(avatarId, userId);
       let currentAvatarPrompt: string;
       let parentVersionId: string | undefined;
 
       if (existingVersions.length > 0) {
-        // Find the most recent version to build upon
-        const latestVersion = existingVersions.reduce((latest, current) => {
+        // First try to get the active version
+        const activeVersion = existingVersions.find(v => v.is_active);
+
+        // If no active version, use the most recent version
+        const versionToUse = activeVersion || existingVersions.reduce((latest, current) => {
           return new Date(current.created_at!) > new Date(latest.created_at!) ? current : latest;
         });
-        currentAvatarPrompt = latestVersion.system_prompt;
-        parentVersionId = latestVersion.id;
+
+        currentAvatarPrompt = versionToUse.system_prompt;
+        parentVersionId = versionToUse.id;
+
+        console.log(`Building on ${activeVersion ? 'active' : 'latest'} version: ${versionToUse.version_number}`);
       } else {
         // No versions exist, use original avatar profile
         currentAvatarPrompt = await this.getAvatarSystemPrompt(avatarId, userId);
+        console.log('No existing versions, building from base avatar profile');
       }
 
       onProgress?.('Generating improved prompts...', 70);
@@ -513,7 +521,8 @@ export class TrainingService {
       // Get current version number for incrementing (we already have existingVersions)
       const versionNumber = `v${existingVersions.length + 1}.0`;
 
-      // Create new prompt version with parent reference
+      // Create new prompt version with parent reference and few-shot examples
+      const changesSummary = generatedPrompts.changes_summary || {};
       const newVersion = await this.createPromptVersion({
         avatar_id: avatarId,
         user_id: userId,
@@ -521,11 +530,25 @@ export class TrainingService {
         parent_version_id: parentVersionId, // Link to parent version for progressive training
         version_number: versionNumber,
         version_name: `Training Update ${new Date().toLocaleDateString()}`,
-        description: `Generated from training session with ${files.length} files`,
+        description: `Incremental update: ${changesSummary.sections_added?.length || 0} sections added, ${changesSummary.sections_updated?.length || 0} sections updated`,
         system_prompt: generatedPrompts.system_prompt,
         personality_traits: generatedPrompts.personality_traits || [],
         behavior_rules: generatedPrompts.behavior_rules || [],
-        response_style: generatedPrompts.response_style || {},
+        response_style: {
+          ...(generatedPrompts.response_style || {}),
+          few_shot_examples: generatedPrompts.few_shot_examples || []
+        },
+        changes_from_parent: {
+          conversation_learning_applied: true,
+          update_type: 'incremental',
+          sections_added: changesSummary.sections_added || [],
+          sections_updated: changesSummary.sections_updated || [],
+          sections_unchanged: changesSummary.sections_unchanged || [],
+          conflict_resolution: changesSummary.conflict_resolution || '',
+          examples_count: generatedPrompts.few_shot_examples?.length || 0,
+          vocabulary_learned: generatedPrompts.response_style?.vocabulary || [],
+          signature_phrases: generatedPrompts.response_style?.signature_phrases || []
+        },
         inheritance_type: 'incremental', // Mark as incremental improvement
         is_active: false, // Don't auto-activate, let user choose
         is_published: false
@@ -659,36 +682,76 @@ export class TrainingService {
         'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
-        model: 'gpt-4',
+        model: 'gpt-4o',
         messages: [
           {
             role: 'system',
-            content: 'You are an expert conversation analyst. Analyze the provided conversation content and extract patterns, communication style, personality traits, and behavioral characteristics. Return a JSON object with your analysis.'
+            content: 'You are an expert conversation analyst specializing in deep learning from conversational examples. Your task is to extract actionable patterns and concrete examples that can be used to train an AI avatar.'
           },
           {
             role: 'user',
-            content: `Analyze this conversation content and provide insights:\n\n${content}\n\nPlease return a JSON object with the following structure:
+            content: `Analyze this conversation content deeply and extract CONCRETE examples and patterns:
+
+CONVERSATION CONTENT:
+${content}
+
+Extract and return a JSON object with:
+1. Actual conversation exchange examples (user input → avatar response pairs)
+2. Specific vocabulary, phrases, and expressions used
+3. Detailed communication patterns with examples
+4. Response structure and formatting preferences
+
+Return this exact JSON structure:
 {
-  "communication_style": {
-    "formality_level": "casual/semi-formal/formal",
-    "emoji_usage": "none/minimal/moderate/heavy",
-    "response_length": "short/medium/long",
-    "tone": "friendly/professional/humorous/etc"
+  "conversation_examples": [
+    {
+      "user_message": "actual user message from conversation",
+      "avatar_response": "actual avatar response from conversation",
+      "pattern_demonstrated": "what pattern this shows (e.g., casual greeting, question handling, etc.)"
+    }
+  ],
+  "vocabulary_and_phrases": {
+    "common_words": ["specific words used frequently"],
+    "signature_phrases": ["exact phrases the avatar uses"],
+    "slang_and_colloquialisms": ["regional or casual language used"],
+    "filler_words": ["like, um, you know, lah, lor, etc."],
+    "exclamations": ["wow, omg, haha, etc."]
   },
-  "personality_traits": ["trait1", "trait2", ...],
-  "behavioral_patterns": ["pattern1", "pattern2", ...],
-  "conversation_topics": ["topic1", "topic2", ...],
-  "response_characteristics": {
-    "typical_greeting": "example",
-    "common_phrases": ["phrase1", "phrase2", ...],
-    "question_style": "direct/indirect/detailed",
-    "supportiveness": "high/medium/low"
+  "communication_patterns": {
+    "greeting_style": {
+      "examples": ["actual greeting examples from conversation"],
+      "pattern": "description of how greetings work"
+    },
+    "question_handling": {
+      "examples": ["how questions were answered"],
+      "pattern": "direct/elaborative/asks-follow-ups"
+    },
+    "response_structure": {
+      "examples": ["actual response structures"],
+      "pattern": "short-punchy/detailed-explanatory/story-telling"
+    },
+    "emotional_expression": {
+      "examples": ["how emotions are expressed"],
+      "pattern": "emoji-heavy/text-based/reserved"
+    }
+  },
+  "linguistic_features": {
+    "formality_level": "casual/semi-formal/formal with evidence",
+    "sentence_structure": "simple/complex/varied with examples",
+    "punctuation_style": "heavy emoji/lots of exclamation/minimal",
+    "response_length": "average character/word count observed"
+  },
+  "behavioral_insights": {
+    "personality_shown": ["traits with supporting examples"],
+    "conversation_flow": "how conversations are maintained",
+    "topics_of_interest": ["specific topics discussed"],
+    "unique_quirks": ["any distinctive conversational behaviors"]
   }
 }`
           }
         ],
-        max_tokens: 1000,
-        temperature: 0.3
+        max_tokens: 3000,
+        temperature: 0.2
       })
     });
 
@@ -707,6 +770,111 @@ export class TrainingService {
     }
   }
 
+  private static buildAnalysisSummary(conversationAnalysis: any, extractedContent: string): string {
+    if (!conversationAnalysis || Object.keys(conversationAnalysis).length === 0) {
+      return `CONVERSATION CONTENT:
+${extractedContent.substring(0, 8000)}${extractedContent.length > 8000 ? '\n...[truncated for length]' : ''}`;
+    }
+
+    let summary = '';
+
+    // Add conversation examples (most important for few-shot learning)
+    if (conversationAnalysis.conversation_examples && conversationAnalysis.conversation_examples.length > 0) {
+      summary += `\nCONVERSATION EXAMPLES (Few-Shot Learning Data):\n`;
+      conversationAnalysis.conversation_examples.slice(0, 10).forEach((ex: any, idx: number) => {
+        summary += `\nExample ${idx + 1} - ${ex.pattern_demonstrated || 'Interaction'}:\n`;
+        summary += `User: "${ex.user_message}"\n`;
+        summary += `Avatar: "${ex.avatar_response}"\n`;
+      });
+    }
+
+    // Add vocabulary and phrases
+    if (conversationAnalysis.vocabulary_and_phrases) {
+      summary += `\nVOCABULARY & PHRASES TO ADOPT:\n`;
+      const vocab = conversationAnalysis.vocabulary_and_phrases;
+      if (vocab.signature_phrases?.length > 0) {
+        summary += `Signature Phrases: ${vocab.signature_phrases.join(', ')}\n`;
+      }
+      if (vocab.slang_and_colloquialisms?.length > 0) {
+        summary += `Slang/Colloquialisms: ${vocab.slang_and_colloquialisms.join(', ')}\n`;
+      }
+      if (vocab.common_words?.length > 0) {
+        summary += `Common Words: ${vocab.common_words.join(', ')}\n`;
+      }
+      if (vocab.filler_words?.length > 0) {
+        summary += `Filler Words: ${vocab.filler_words.join(', ')}\n`;
+      }
+      if (vocab.exclamations?.length > 0) {
+        summary += `Exclamations: ${vocab.exclamations.join(', ')}\n`;
+      }
+    }
+
+    // Add communication patterns
+    if (conversationAnalysis.communication_patterns) {
+      summary += `\nCOMMUNICATION PATTERNS OBSERVED:\n`;
+      const patterns = conversationAnalysis.communication_patterns;
+
+      if (patterns.greeting_style) {
+        summary += `\nGreeting Style:\n`;
+        summary += `Pattern: ${patterns.greeting_style.pattern}\n`;
+        if (patterns.greeting_style.examples?.length > 0) {
+          summary += `Examples: ${patterns.greeting_style.examples.join(' | ')}\n`;
+        }
+      }
+
+      if (patterns.question_handling) {
+        summary += `\nQuestion Handling:\n`;
+        summary += `Pattern: ${patterns.question_handling.pattern}\n`;
+        if (patterns.question_handling.examples?.length > 0) {
+          summary += `Examples: ${patterns.question_handling.examples.join(' | ')}\n`;
+        }
+      }
+
+      if (patterns.response_structure) {
+        summary += `\nResponse Structure:\n`;
+        summary += `Pattern: ${patterns.response_structure.pattern}\n`;
+        if (patterns.response_structure.examples?.length > 0) {
+          summary += `Examples: ${patterns.response_structure.examples.join(' | ')}\n`;
+        }
+      }
+
+      if (patterns.emotional_expression) {
+        summary += `\nEmotional Expression:\n`;
+        summary += `Pattern: ${patterns.emotional_expression.pattern}\n`;
+        if (patterns.emotional_expression.examples?.length > 0) {
+          summary += `Examples: ${patterns.emotional_expression.examples.join(' | ')}\n`;
+        }
+      }
+    }
+
+    // Add linguistic features
+    if (conversationAnalysis.linguistic_features) {
+      summary += `\nLINGUISTIC FEATURES:\n`;
+      const features = conversationAnalysis.linguistic_features;
+      summary += `Formality: ${features.formality_level || 'not specified'}\n`;
+      summary += `Sentence Structure: ${features.sentence_structure || 'not specified'}\n`;
+      summary += `Punctuation Style: ${features.punctuation_style || 'not specified'}\n`;
+      summary += `Response Length: ${features.response_length || 'not specified'}\n`;
+    }
+
+    // Add behavioral insights
+    if (conversationAnalysis.behavioral_insights) {
+      summary += `\nBEHAVIORAL INSIGHTS:\n`;
+      const insights = conversationAnalysis.behavioral_insights;
+      if (insights.personality_shown?.length > 0) {
+        summary += `Personality Traits: ${insights.personality_shown.join(', ')}\n`;
+      }
+      if (insights.conversation_flow) {
+        summary += `Conversation Flow: ${insights.conversation_flow}\n`;
+      }
+      if (insights.unique_quirks?.length > 0) {
+        summary += `Unique Quirks: ${insights.unique_quirks.join(', ')}\n`;
+      }
+    }
+
+    return summary;
+  }
+
   private static async generateImprovedPrompts(
     currentSystemPrompt: string,
     trainingInstructions: string,
@@ -719,51 +887,105 @@ export class TrainingService {
       throw new Error('OpenAI API key required for prompt generation');
     }
 
-    const prompt = `You are an expert conversation designer. Your task is to create CONVERSATION GUIDELINES that enhance how the avatar communicates, WITHOUT changing their core identity, background, or personality.
+    // Build detailed analysis summary with examples
+    const analysisWithExamples = this.buildAnalysisSummary(conversationAnalysis, extractedContent);
 
-CURRENT AVATAR SYSTEM PROMPT (DO NOT MODIFY THE CORE CONTENT):
+    const prompt = `You are an expert AI conversation designer specializing in INCREMENTAL prompt enhancement and behavioral cloning.
+
+CURRENT AVATAR SYSTEM PROMPT (PRESERVE 100% - COPY EXACTLY AS-IS):
 ${currentSystemPrompt || 'You are a helpful AI assistant. Respond in a friendly and helpful manner.'}
 
-USER'S CONVERSATION TRAINING INSTRUCTIONS:
-${trainingInstructions}
+NEW USER'S TRAINING INSTRUCTIONS:
+${trainingInstructions || 'Learn from the conversation examples provided and adopt the communication style demonstrated.'}
 
-CONVERSATION ANALYSIS RESULTS:
-${JSON.stringify(conversationAnalysis || {}, null, 2).substring(0, 1000)}${JSON.stringify(conversationAnalysis || {}, null, 2).length > 1000 ? '...[truncated]' : ''}
+${analysisWithExamples}
 
-CONVERSATION EXAMPLES:
-${(extractedContent || 'No conversation content provided').substring(0, 2000)}${(extractedContent || '').length > 2000 ? '...[truncated for length]' : ''}
+CRITICAL TASK - INCREMENTAL UPDATE ONLY:
+Your job is to COPY THE ENTIRE EXISTING PROMPT and ADD/UPDATE training instructions. DO NOT regenerate or rewrite the existing content.
 
-TASK: Create CONVERSATION FINE-TUNING GUIDELINES based on the user's instructions. DO NOT rewrite the avatar's identity, background, or core personality. Instead, focus on HOW they should communicate.
+STEP-BY-STEP PROCESS:
+1. **COPY 100%** of the existing prompt above - every single character, including all previous training sections
+2. **CHECK FOR CONFLICTS**: Compare new training with existing training sections
+   - If there's conflict (e.g., new says "be casual" but old says "be formal"), REPLACE only that specific section
+   - If no conflict, APPEND as new section
+3. **ADD NEW TRAINING** at the end with clear, highly visible markers
 
-Your task is to:
-1. PRESERVE the entire original system prompt exactly as-is
-2. CREATE additional conversation guidelines that will be APPENDED to the original prompt
-3. Focus on communication style, greeting patterns, response formatting, language usage, etc.
-4. DO NOT change names, backgrounds, personality traits, or core avatar information
+TRAINING SECTION FORMAT (CRITICAL FOR AI TO FOLLOW):
+Use this EXACT format for maximum AI visibility and priority:
 
-Create conversation guidelines for these areas based on the training instructions:
-- Greeting behavior and introductions
-- Communication style and tone
-- Language usage (slang, formality, regional expressions)
-- Response patterns and formatting
-- Conversation flow and interaction style
+═══════════════════════════════════════════════════════
+🎯 PRIORITY TRAINING INSTRUCTIONS - FOLLOW THESE FIRST 🎯
+═══════════════════════════════════════════════════════
 
-Return ONLY a valid JSON object with this exact structure:
+[Training content with numbered rules]
+
+IMPORTANT: Place the NEWEST training at the TOP of training sections (reverse chronological order).
+This ensures the AI sees and follows the latest instructions FIRST.
+
+Return ONLY valid JSON:
 {
-  "original_prompt_preserved": true,
-  "conversation_guidelines": "Detailed conversation guidelines to be appended to the original prompt, focusing purely on HOW to communicate based on the training instructions",
-  "enhanced_system_prompt": "The complete original prompt + the new conversation guidelines appended at the end",
-  "behavior_rules": ["specific conversation behaviors from the training instructions"],
-  "response_style": {
-    "formality": "casual/formal based on training instructions",
-    "emoji_usage": "minimal/moderate/frequent based on instructions",
-    "response_length": "short/medium/long based on instructions",
-    "tone": "friendly/professional/etc based on instructions"
+  "enhanced_system_prompt": "Complete existing prompt (100% copied) + new training section with strong markers",
+  "changes_summary": {
+    "sections_added": ["list of new sections added"],
+    "sections_updated": ["list of sections that were updated/replaced"],
+    "sections_unchanged": ["list of sections kept as-is"],
+    "conflict_resolution": "description of how conflicts were resolved"
   },
-  "improvement_notes": "Summary of the conversation enhancements added (without changing core identity)"
+  "few_shot_examples": [
+    {
+      "user": "example user message from training",
+      "assistant": "example response showing desired style",
+      "demonstrates": "what pattern this teaches"
+    }
+  ],
+  "behavior_rules": [
+    "Only NEW or UPDATED rules from this training session"
+  ],
+  "response_style": {
+    "formality": "exact level observed",
+    "vocabulary": ["NEW specific words to use"],
+    "signature_phrases": ["NEW exact phrases to incorporate"],
+    "emoji_usage": "specific pattern observed",
+    "response_length": "typical length in words",
+    "sentence_structure": "observed pattern with example"
+  },
+  "improvement_notes": "What was added/changed in this training iteration"
 }
 
-CRITICAL: Keep the avatar's identity, background, and personality completely intact. Only add conversation guidelines that improve HOW they communicate, not WHO they are.`;
+EXAMPLE OUTPUT STRUCTURE:
+[Original avatar identity and personality - copied exactly]
+
+═══════════════════════════════════════════════════════
+🎯 PRIORITY TRAINING INSTRUCTIONS - FOLLOW THESE FIRST 🎯
+═══════════════════════════════════════════════════════
+
+TRAINING SESSION 3 (${new Date().toLocaleDateString()}) - **HIGHEST PRIORITY**
+1. [New instruction from this session]
+2. [Another new instruction]
+
+Few-shot examples:
+User: "[example]"
+You: "[desired response]"
+
+---
+
+TRAINING SESSION 2 (Previous) - Follow if not contradicted above
+[Previous training content - preserved]
+
+---
+
+TRAINING SESSION 1 (Original) - Follow if not contradicted above
+[Original training content - preserved]
+
+═══════════════════════════════════════════════════════
+
+CRITICAL RULES:
+- COPY the entire existing prompt first (100% preservation)
+- Place NEWEST training at the TOP with strong visual markers
+- Use the exact format above for training sections
+- Mark training sections with ═══ borders and 🎯 emoji for high visibility
+- Number all training rules clearly
+- Include few-shot examples in each training section`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -774,11 +996,14 @@ CRITICAL: Keep the avatar's identity, background, and personality completely int
       body: JSON.stringify({
         model: 'gpt-4o',
         messages: [
-          { role: 'system', content: 'You are an expert AI prompt engineer specializing in avatar personality development. You make precise minimal changes while preserving all original content.' },
+          {
+            role: 'system',
+            content: 'You are an expert AI prompt engineer specializing in few-shot learning and behavioral cloning. You preserve original content 100% while adding powerful conversation training through concrete examples.'
+          },
           { role: 'user', content: prompt }
         ],
-        max_tokens: 8000,
-        temperature: 0.3
+        max_tokens: 12000,
+        temperature: 0.2
       })
     });
 
@@ -791,8 +1016,16 @@ CRITICAL: Keep the avatar's identity, background, and personality completely int
     const generatedText = data.choices[0]?.message?.content || '{}';
 
     try {
+      // Remove markdown code blocks if present
+      let cleanedText = generatedText.trim();
+      if (cleanedText.startsWith('```json')) {
+        cleanedText = cleanedText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (cleanedText.startsWith('```')) {
+        cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+
       // Try to parse as JSON first
-      const parsed = JSON.parse(generatedText);
+      const parsed = JSON.parse(cleanedText);
 
       // Transform the new format to the expected format
       if (parsed.enhanced_system_prompt) {
@@ -801,12 +1034,16 @@ CRITICAL: Keep the avatar's identity, background, and personality completely int
           personality_traits: [],
           behavior_rules: parsed.behavior_rules || [],
           response_style: parsed.response_style || {},
-          improvement_notes: parsed.improvement_notes || 'Conversation guidelines added'
+          few_shot_examples: parsed.few_shot_examples || [],
+          changes_summary: parsed.changes_summary || {},
+          improvement_notes: parsed.improvement_notes || parsed.changes_summary?.conflict_resolution || 'Incremental training update applied'
         };
       }
 
       return parsed;
-    } catch {
+    } catch (parseError) {
+      console.error('JSON parsing error:', parseError);
+
       // If JSON parsing fails, try to extract JSON from the text
       const jsonMatch = generatedText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -820,37 +1057,36 @@ CRITICAL: Keep the avatar's identity, background, and personality completely int
               personality_traits: [],
               behavior_rules: parsed.behavior_rules || [],
               response_style: parsed.response_style || {},
-              improvement_notes: parsed.improvement_notes || 'Conversation guidelines added'
+              few_shot_examples: parsed.few_shot_examples || [],
+              changes_summary: parsed.changes_summary || {},
+              improvement_notes: parsed.improvement_notes || parsed.changes_summary?.conflict_resolution || 'Incremental training update applied'
             };
           }
 
           return parsed;
         } catch {
           // Still failed, fall back to extracting system prompt from the text
+          console.error('Failed to parse extracted JSON');
         }
       }
 
-      // Extract just the system_prompt if it's wrapped in quotes or backticks
-      let extractedPrompt = generatedText;
-      const systemPromptMatch = generatedText.match(/"enhanced_system_prompt":\s*"([^"]*?)"/);
-      if (systemPromptMatch) {
-        extractedPrompt = systemPromptMatch[1];
-      } else {
-        // Clean up common formatting issues
-        extractedPrompt = generatedText
-          .replace(/^```json\s*/, '')
-          .replace(/\s*```$/, '')
-          .replace(/^As no conversation examples.*?Here is the enhanced prompt:\s*/i, '')
-          .replace(/The improvements aim to.*$/s, '')
-          .trim();
-      }
+      // Last resort: use the generated text as the system prompt
+      console.warn('Using raw generated text as system prompt');
+      let extractedPrompt = generatedText
+        .replace(/^```json\s*/, '')
+        .replace(/^```\s*/, '')
+        .replace(/\s*```$/, '')
+        .replace(/^As no conversation examples.*?Here is the enhanced prompt:\s*/i, '')
+        .replace(/The improvements aim to.*$/s, '')
+        .trim();
 
       return {
         system_prompt: extractedPrompt,
-        improvement_notes: 'Generated prompt (parsing failed)',
+        improvement_notes: 'Generated prompt (JSON parsing failed, used raw output)',
         personality_traits: [],
         behavior_rules: [],
-        response_style: {}
+        response_style: {},
+        few_shot_examples: []
       };
     }
   }
