@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Settings,
   Key,
@@ -185,13 +186,20 @@ const SettingsSection = () => {
                 
                 <div className="space-y-2">
                   <Label htmlFor="service">Service</Label>
-                  <Input
-                    id="service"
-                    placeholder="e.g., OpenAI, ElevenLabs"
-                    value={newApiKey.service}
-                    onChange={(e) => setNewApiKey({...newApiKey, service: e.target.value})}
-                    className="input-modern"
-                  />
+                  <Select value={newApiKey.service} onValueChange={(value) => setNewApiKey({...newApiKey, service: value})}>
+                    <SelectTrigger className="input-modern">
+                      <SelectValue placeholder="Select a service..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="openai">OpenAI (DALL-E, GPT, etc.)</SelectItem>
+                      <SelectItem value="stability">Stability AI (Image Generation)</SelectItem>
+                      <SelectItem value="kie-ai">KIE AI (Flux Models)</SelectItem>
+                      <SelectItem value="elevenlabs">ElevenLabs (Voice)</SelectItem>
+                      <SelectItem value="replicate">Replicate (Various Models)</SelectItem>
+                      <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                      <SelectItem value="google">Google (Gemini)</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 
                 <div className="space-y-2">

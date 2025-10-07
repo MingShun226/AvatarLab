@@ -1,81 +1,97 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Progress } from '@/components/ui/progress';
+import { Slider } from '@/components/ui/slider';
 import {
   Image,
   Sparkles,
   Download,
-  Upload,
   Grid3x3,
   Heart,
   Trash2,
-  Plus,
   Loader2,
-  FolderPlus
+  Wand2,
+  Zap,
+  Palette
 } from 'lucide-react';
+import { ImageUploadBox } from '@/components/ui/image-upload-box';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  generateImage,
+  checkGenerationProgress,
+  saveGeneratedImage,
+  getUserImages,
+  deleteImage as deleteImageService,
+  toggleFavorite as toggleFavoriteService,
+  downloadImage,
+  AIProvider,
+  GeneratedImage,
+} from '@/services/imageGeneration';
 
-interface GeneratedImage {
-  id: string;
-  prompt: string;
-  image_url: string;
-  original_image_url?: string;
-  generation_type: string;
-  is_favorite: boolean;
-  created_at: string;
-}
-
-interface ImageCollection {
-  id: string;
-  name: string;
-  description?: string;
-  created_at: string;
-}
+const PROVIDERS = [
+  { value: 'google', label: 'Google Gemini (Nano Banana 🍌)', icon: Sparkles, description: 'Best for img2img, character consistency, fast & affordable', supportsImg2img: true },
+  { value: 'openai', label: 'OpenAI DALL-E 3', icon: Sparkles, description: 'Highest quality, text-to-image only', supportsImg2img: false },
+  { value: 'stability', label: 'Stability AI', icon: Palette, description: 'Great for artistic styles, supports img2img', supportsImg2img: true },
+  { value: 'kie-ai', label: 'KIE AI Flux', icon: Zap, description: 'Fast generation, text-to-image only', supportsImg2img: false },
+];
 
 const ImagesSection = () => {
   const { user } = useAuth();
   const { toast } = useToast();
-  const [prompt, setPrompt] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [images, setImages] = useState<GeneratedImage[]>([]);
-  const [collections, setCollections] = useState<ImageCollection[]>([]);
-  const [isLoadingImages, setIsLoadingImages] = useState(true);
-  const [isLoadingCollections, setIsLoadingCollections] = useState(true);
 
+  // State
+  const [generationMode, setGenerationMode] = useState<'text2img' | 'img2img'>('text2img');
+  const [prompt, setPrompt] = useState('');
+  const [negativePrompt, setNegativePrompt] = useState('');
+  const [provider, setProvider] = useState<AIProvider>('google');
+  const [inputImage, setInputImage] = useState<string | null>(null);
+  const [strength, setStrength] = useState(0.8);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generationProgress, setGenerationProgress] = useState(0);
+  const [images, setImages] = useState<GeneratedImage[]>([]);
+  const [isLoadingImages, setIsLoadingImages] = useState(true);
+  const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
+
+  // Load images on mount
   useEffect(() => {
     if (user) {
       loadImages();
-      loadCollections();
     }
   }, [user]);
+
+  // Auto-switch to compatible provider when switching to img2img
+  useEffect(() => {
+    if (generationMode === 'img2img') {
+      const currentProvider = PROVIDERS.find(p => p.value === provider);
+      if (currentProvider && !currentProvider.supportsImg2img) {
+        // Switch to Google (Nano Banana) as default for img2img
+        const img2imgProvider = PROVIDERS.find(p => p.supportsImg2img);
+        if (img2imgProvider) {
+          setProvider(img2imgProvider.value as AIProvider);
+          toast({
+            title: "Provider switched",
+            description: `Switched to ${img2imgProvider.label} (supports img2img)`,
+          });
+        }
+      }
+      // Clear input image when switching back to text2img
+    } else if (generationMode === 'text2img' && inputImage) {
+      setInputImage(null);
+    }
+  }, [generationMode]);
 
   const loadImages = async () => {
     try {
       setIsLoadingImages(true);
-
-      if (!user?.id) {
-        setIsLoadingImages(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('generated_images')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        throw error;
-      }
-
-      setImages(data || []);
+      const loadedImages = await getUserImages();
+      setImages(loadedImages);
     } catch (error: any) {
       console.error('Error loading images:', error);
       toast({
@@ -85,41 +101,6 @@ const ImagesSection = () => {
       });
     } finally {
       setIsLoadingImages(false);
-    }
-  };
-
-  const loadCollections = async () => {
-    try {
-      setIsLoadingCollections(true);
-
-      if (!user?.id) {
-        setIsLoadingCollections(false);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('image_collections')
-        .select(`
-          *,
-          image_collection_items(count)
-        `)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        throw error;
-      }
-
-      setCollections(data || []);
-    } catch (error: any) {
-      console.error('Error loading collections:', error);
-      toast({
-        title: "Error loading collections",
-        description: error.message || "Failed to load collections",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoadingCollections(false);
     }
   };
 
@@ -133,52 +114,140 @@ const ImagesSection = () => {
       return;
     }
 
-    // This is a placeholder for image generation
-    toast({
-      title: "Coming Soon",
-      description: "Image generation will be available with full backend integration.",
-    });
+    // Validate img2img requirements
+    if (generationMode === 'img2img' && !inputImage) {
+      toast({
+        title: "Error",
+        description: "Please upload an image for img2img generation",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+    setGenerationProgress(0);
+
+    try {
+      const providerLabel = PROVIDERS.find(p => p.value === provider)?.label;
+      toast({
+        title: "Starting generation...",
+        description: `Using ${providerLabel} in ${generationMode === 'img2img' ? 'img2img' : 'text-to-image'} mode`,
+      });
+
+      // Start generation
+      const { taskId, provider: usedProvider } = await generateImage({
+        prompt,
+        provider,
+        negativePrompt: negativePrompt || undefined,
+        inputImage: generationMode === 'img2img' ? inputImage || undefined : undefined,
+        strength: generationMode === 'img2img' ? strength : undefined,
+      });
+
+      setCurrentTaskId(taskId);
+
+      // For async providers (kie-ai), poll for completion
+      if (usedProvider === 'kie-ai' && taskId) {
+        let imageUrl: string | null = null;
+        let attempts = 0;
+        const maxAttempts = 60;
+
+        while (attempts < maxAttempts && !imageUrl) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+
+          const progress = await checkGenerationProgress(taskId);
+          setGenerationProgress(progress.progress);
+
+          if (progress.status === 'completed' && progress.imageUrl) {
+            imageUrl = progress.imageUrl;
+            break;
+          }
+
+          if (progress.status === 'failed') {
+            throw new Error(progress.error || 'Generation failed');
+          }
+
+          attempts++;
+        }
+
+        if (!imageUrl) {
+          throw new Error('Generation timeout');
+        }
+
+        // Save the generated image
+        const savedImage = await saveGeneratedImage(
+          imageUrl,
+          prompt,
+          usedProvider,
+          'flux-kontext-pro',
+          { negative_prompt: negativePrompt }
+        );
+
+        setImages([savedImage, ...images]);
+
+        toast({
+          title: "Image generated!",
+          description: "Your image has been saved to the gallery.",
+        });
+      } else {
+        // For sync providers (openai, stability)
+        // The response already contains the image URL
+        toast({
+          title: "Image generated!",
+          description: "Your image has been saved to the gallery.",
+        });
+
+        // Reload images to get the new one
+        await loadImages();
+      }
+
+      // Reset form
+      setPrompt('');
+      setNegativePrompt('');
+      setGenerationProgress(100);
+
+    } catch (error: any) {
+      console.error('Error generating image:', error);
+      toast({
+        title: "Generation failed",
+        description: error.message || "Failed to generate image",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+      setCurrentTaskId(null);
+      setGenerationProgress(0);
+    }
   };
 
-  const toggleFavorite = async (imageId: string) => {
+  const handleToggleFavorite = async (imageId: string) => {
     try {
       const image = images.find(img => img.id === imageId);
       if (!image) return;
 
-      const { error } = await supabase
-        .from('generated_images')
-        .update({ is_favorite: !image.is_favorite })
-        .eq('id', imageId);
-
-      if (error) throw error;
+      const newFavoriteStatus = !image.is_favorite;
+      await toggleFavoriteService(imageId, newFavoriteStatus);
 
       setImages(images.map(img =>
-        img.id === imageId ? { ...img, is_favorite: !img.is_favorite } : img
+        img.id === imageId ? { ...img, is_favorite: newFavoriteStatus } : img
       ));
 
       toast({
-        title: image.is_favorite ? "Removed from favorites" : "Added to favorites",
-        description: `Image ${image.is_favorite ? 'removed from' : 'added to'} your favorites.`,
+        title: newFavoriteStatus ? "Added to favorites" : "Removed from favorites",
       });
     } catch (error: any) {
       toast({
         title: "Error",
-        description: `Failed to update favorite: ${error.message}`,
+        description: error.message,
         variant: "destructive",
       });
     }
   };
 
-  const deleteImage = async (imageId: string) => {
+  const handleDeleteImage = async (imageId: string) => {
     try {
-      const { error } = await supabase
-        .from('generated_images')
-        .delete()
-        .eq('id', imageId);
-
-      if (error) throw error;
-
+      await deleteImageService(imageId);
       setImages(images.filter(img => img.id !== imageId));
+
       toast({
         title: "Image deleted",
         description: "The image has been deleted successfully.",
@@ -186,97 +255,223 @@ const ImagesSection = () => {
     } catch (error: any) {
       toast({
         title: "Error",
-        description: `Failed to delete image: ${error.message}`,
+        description: error.message,
         variant: "destructive",
       });
     }
   };
 
-  const createCollection = async (name: string, description?: string) => {
+  const handleDownload = async (imageUrl: string, imageId: string) => {
     try {
-      if (!user?.id) throw new Error('User not authenticated');
+      const filename = `ai-image-${imageId}.png`;
+      await downloadImage(imageUrl, filename);
 
-      const { data, error } = await supabase
-        .from('image_collections')
-        .insert({
-          user_id: user.id,
-          name,
-          description
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      setCollections([data, ...collections]);
       toast({
-        title: "Collection created",
-        description: `Collection "${name}" has been created successfully.`,
+        title: "Download started",
+        description: "Your image is being downloaded.",
       });
     } catch (error: any) {
+      // Show fallback instructions
       toast({
-        title: "Error",
-        description: `Failed to create collection: ${error.message}`,
+        title: "Download via proxy failed",
+        description: "Right-click the image and select 'Save Image As' instead.",
         variant: "destructive",
       });
+      console.error('Download error:', error);
     }
   };
+
+  const selectedProvider = PROVIDERS.find(p => p.value === provider);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2">
-          <Image className="h-6 w-6" />
+        <h1 className="text-3xl font-bold flex items-center gap-2">
+          <Wand2 className="h-8 w-8" />
           AI Images Studio
         </h1>
-        <p className="text-muted-foreground">
-          Generate, organize, and manage your AI-created images
+        <p className="text-muted-foreground mt-2">
+          Generate stunning images with AI - powered by multiple providers
         </p>
       </div>
 
-      <Tabs defaultValue="generate" className="space-y-4">
-        <TabsList>
+      <Tabs defaultValue="generate" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
           <TabsTrigger value="generate">Generate</TabsTrigger>
-          <TabsTrigger value="gallery">Gallery</TabsTrigger>
-          <TabsTrigger value="collections">Collections</TabsTrigger>
+          <TabsTrigger value="gallery">Gallery ({images.length})</TabsTrigger>
         </TabsList>
 
         {/* Generate Tab */}
-        <TabsContent value="generate" className="space-y-4">
+        <TabsContent value="generate" className="space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Sparkles className="h-5 w-5" />
-                Generate New Image
+                Create New Image
               </CardTitle>
               <CardDescription>
-                Describe what you want to create and let AI bring it to life
+                Describe your vision and let AI bring it to life
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="space-y-6">
+              {/* Generation Mode Toggle */}
               <div className="space-y-2">
-                <Label htmlFor="prompt">Prompt</Label>
+                <Label>Generation Mode</Label>
+                <Tabs value={generationMode} onValueChange={(value) => setGenerationMode(value as 'text2img' | 'img2img')} className="w-full">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="text2img">Text-to-Image</TabsTrigger>
+                    <TabsTrigger value="img2img">Image-to-Image</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                <p className="text-xs text-muted-foreground">
+                  {generationMode === 'text2img'
+                    ? 'Generate images from text descriptions only'
+                    : 'Upload an image and modify it with AI'}
+                </p>
+              </div>
+
+              {/* Provider Selection */}
+              <div className="space-y-2">
+                <Label>AI Provider</Label>
+                <Select value={provider} onValueChange={(value) => setProvider(value as AIProvider)}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue>
+                      {selectedProvider && (
+                        <div className="flex items-center gap-2">
+                          <selectedProvider.icon className="h-4 w-4" />
+                          <span>{selectedProvider.label}</span>
+                        </div>
+                      )}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROVIDERS
+                      .filter(p => generationMode === 'text2img' || p.supportsImg2img)
+                      .map((p) => {
+                        const Icon = p.icon;
+                        return (
+                          <SelectItem key={p.value} value={p.value}>
+                            <div className="flex items-center gap-2">
+                              <Icon className="h-4 w-4" />
+                              <div>
+                                <div className="font-medium">{p.label}</div>
+                                <div className="text-xs text-muted-foreground">{p.description}</div>
+                              </div>
+                            </div>
+                          </SelectItem>
+                        );
+                      })}
+                  </SelectContent>
+                </Select>
+                {selectedProvider && (
+                  <p className="text-sm text-muted-foreground flex items-center gap-2">
+                    <selectedProvider.icon className="h-4 w-4" />
+                    {selectedProvider.description}
+                  </p>
+                )}
+              </div>
+
+              {/* Image Upload for img2img */}
+              {generationMode === 'img2img' && (
+                <div className="space-y-2">
+                  <Label>Input Image *</Label>
+                  <ImageUploadBox
+                    onImageSelect={(base64) => setInputImage(base64)}
+                    onImageRemove={() => setInputImage(null)}
+                    currentImage={inputImage || undefined}
+                    maxSizeMB={4}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Upload the image you want to modify. The AI will transform it based on your prompt.
+                  </p>
+                </div>
+              )}
+
+              {/* Strength Slider for img2img */}
+              {generationMode === 'img2img' && inputImage && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <Label>Transformation Strength</Label>
+                    <span className="text-sm text-muted-foreground">{Math.round(strength * 100)}%</span>
+                  </div>
+                  <Slider
+                    value={[strength]}
+                    onValueChange={(values) => setStrength(values[0])}
+                    min={0.1}
+                    max={1}
+                    step={0.05}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Lower values keep the original image more intact. Higher values allow more creative freedom.
+                  </p>
+                </div>
+              )}
+
+              {/* Prompt */}
+              <div className="space-y-2">
+                <Label htmlFor="prompt">Prompt *</Label>
                 <Textarea
                   id="prompt"
-                  placeholder="A majestic mountain landscape at sunset with golden light..."
+                  placeholder={
+                    generationMode === 'text2img'
+                      ? "A serene mountain landscape at sunset with golden light streaming through clouds, photorealistic, 4k quality..."
+                      : "Change the background to a futuristic cityscape at night with neon lights, keep the subject in focus..."
+                  }
                   value={prompt}
                   onChange={(e) => setPrompt(e.target.value)}
-                  className="min-h-[100px]"
+                  className="min-h-[120px] resize-none"
+                  disabled={isGenerating}
                 />
+                <p className="text-xs text-muted-foreground">
+                  {generationMode === 'text2img'
+                    ? 'Describe the image you want to create in detail'
+                    : 'Describe how you want to transform the uploaded image'}
+                </p>
               </div>
+
+              {/* Negative Prompt */}
+              <div className="space-y-2">
+                <Label htmlFor="negative-prompt">Negative Prompt (Optional)</Label>
+                <Textarea
+                  id="negative-prompt"
+                  placeholder="blurry, low quality, distorted, ugly..."
+                  value={negativePrompt}
+                  onChange={(e) => setNegativePrompt(e.target.value)}
+                  className="min-h-[80px] resize-none"
+                  disabled={isGenerating}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Describe what you don't want in the image
+                </p>
+              </div>
+
+              {/* Progress */}
+              {isGenerating && generationProgress > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Generating...</span>
+                    <span className="font-medium">{Math.round(generationProgress)}%</span>
+                  </div>
+                  <Progress value={generationProgress} className="h-2" />
+                </div>
+              )}
+
+              {/* Generate Button */}
               <Button
                 onClick={handleGenerate}
-                disabled={isGenerating}
-                className="w-full"
+                disabled={isGenerating || !prompt.trim()}
+                className="w-full h-12 text-lg"
+                size="lg"
               >
                 {isGenerating ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                     Generating...
                   </>
                 ) : (
                   <>
-                    <Sparkles className="mr-2 h-4 w-4" />
+                    <Sparkles className="mr-2 h-5 w-5" />
                     Generate Image
                   </>
                 )}
@@ -291,123 +486,83 @@ const ImagesSection = () => {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Grid3x3 className="h-5 w-5" />
-                Your Images ({images.length})
+                Your Generated Images
               </CardTitle>
               <CardDescription>
-                Browse and manage your generated images
+                Browse, download, and manage your AI-generated masterpieces
               </CardDescription>
             </CardHeader>
             <CardContent>
               {isLoadingImages ? (
-                <div className="flex justify-center items-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin" />
-                  <span className="ml-2">Loading images...</span>
+                <div className="flex flex-col items-center justify-center py-16">
+                  <Loader2 className="h-12 w-12 animate-spin text-primary mb-4" />
+                  <p className="text-muted-foreground">Loading your images...</p>
                 </div>
               ) : images.length === 0 ? (
-                <div className="text-center py-8">
-                  <Image className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">No images generated yet</p>
-                  <p className="text-sm text-muted-foreground">Create your first image in the Generate tab</p>
+                <div className="text-center py-16">
+                  <Image className="h-16 w-16 mx-auto text-muted-foreground mb-4 opacity-50" />
+                  <h3 className="text-lg font-semibold mb-2">No images yet</h3>
+                  <p className="text-muted-foreground mb-6">Create your first AI-generated image in the Generate tab</p>
+                  <Button onClick={() => document.querySelector('[value="generate"]')?.click()}>
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    Start Creating
+                  </Button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {images.map((image) => (
-                    <div key={image.id} className="relative group">
-                      <div className="aspect-square overflow-hidden rounded-lg border">
+                    <div key={image.id} className="group relative">
+                      <div className="aspect-square overflow-hidden rounded-lg border bg-muted">
                         <img
                           src={image.image_url}
                           alt={image.prompt}
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-cover transition-transform group-hover:scale-105"
                         />
                       </div>
-                      <div className="absolute top-2 right-2 flex gap-1">
+
+                      {/* Action Buttons */}
+                      <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button
                           size="sm"
                           variant="secondary"
-                          className="h-8 w-8 p-0"
-                          onClick={() => toggleFavorite(image.id)}
+                          className="h-8 w-8 p-0 backdrop-blur-sm bg-background/80"
+                          onClick={() => handleDownload(image.image_url, image.id)}
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="h-8 w-8 p-0 backdrop-blur-sm bg-background/80"
+                          onClick={() => handleToggleFavorite(image.id)}
                         >
                           <Heart className={`h-4 w-4 ${image.is_favorite ? 'fill-red-500 text-red-500' : ''}`} />
                         </Button>
                         <Button
                           size="sm"
                           variant="destructive"
-                          className="h-8 w-8 p-0"
-                          onClick={() => deleteImage(image.id)}
+                          className="h-8 w-8 p-0 backdrop-blur-sm bg-destructive/80"
+                          onClick={() => handleDeleteImage(image.id)}
                         >
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
-                      <div className="p-2">
-                        <p className="text-sm text-muted-foreground line-clamp-2">
+
+                      {/* Image Info */}
+                      <div className="mt-3 space-y-2">
+                        <p className="text-sm text-foreground line-clamp-2 leading-relaxed">
                           {image.prompt}
                         </p>
-                        <div className="flex items-center justify-between mt-2">
-                          <Badge variant="outline">{image.generation_type}</Badge>
+                        <div className="flex items-center justify-between gap-2">
+                          <Badge variant="outline" className="text-xs">
+                            {image.provider || 'kie-ai'}
+                          </Badge>
                           <span className="text-xs text-muted-foreground">
                             {new Date(image.created_at).toLocaleDateString()}
                           </span>
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Collections Tab */}
-        <TabsContent value="collections" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FolderPlus className="h-5 w-5" />
-                Collections ({collections.length})
-              </CardTitle>
-              <CardDescription>
-                Organize your images into collections
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isLoadingCollections ? (
-                <div className="flex justify-center items-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin" />
-                  <span className="ml-2">Loading collections...</span>
-                </div>
-              ) : collections.length === 0 ? (
-                <div className="text-center py-8">
-                  <FolderPlus className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">No collections created yet</p>
-                  <Button
-                    className="mt-4"
-                    onClick={() => createCollection('My First Collection', 'A collection for my favorite images')}
-                  >
-                    <Plus className="mr-2 h-4 w-4" />
-                    Create Collection
-                  </Button>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {collections.map((collection) => (
-                    <Card key={collection.id} className="cursor-pointer hover:shadow-md transition-shadow">
-                      <CardContent className="p-4">
-                        <h3 className="font-semibold">{collection.name}</h3>
-                        {collection.description && (
-                          <p className="text-sm text-muted-foreground mt-1">{collection.description}</p>
-                        )}
-                        <div className="flex items-center justify-between mt-3">
-                          <Badge variant="outline">
-                            {Array.isArray(collection.image_collection_items)
-                              ? collection.image_collection_items.length
-                              : 0} images
-                          </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {new Date(collection.created_at).toLocaleDateString()}
-                          </span>
-                        </div>
-                      </CardContent>
-                    </Card>
                   ))}
                 </div>
               )}
