@@ -225,10 +225,33 @@ async function generateWithGemini(prompt: string, parameters: any, apiKey: strin
 
     for (let i = 0; i < imagesToProcess.length; i++) {
       const img = imagesToProcess[i];
-      // Extract mime type from data URL
-      const mimeTypeMatch = img.match(/^data:(image\/\w+);base64,/);
-      const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
-      const base64Data = img.replace(/^data:image\/\w+;base64,/, '');
+      let base64Data: string;
+      let mimeType = 'image/jpeg';
+
+      // Check if it's already a base64 data URL or an HTTP URL
+      if (img.startsWith('data:image')) {
+        // Extract mime type from data URL
+        const mimeTypeMatch = img.match(/^data:(image\/\w+);base64,/);
+        mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
+        base64Data = img.replace(/^data:image\/\w+;base64,/, '');
+      } else if (img.startsWith('http')) {
+        // Fetch the image from the URL and convert to base64
+        console.log(`Fetching image ${i + 1} from URL:`, img);
+        const imageResponse = await fetch(img);
+        if (!imageResponse.ok) {
+          throw new Error(`Failed to fetch image from URL: ${img}`);
+        }
+
+        const arrayBuffer = await imageResponse.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        base64Data = btoa(String.fromCharCode.apply(null, Array.from(bytes)));
+
+        // Determine mime type from Content-Type header or default to png
+        const contentType = imageResponse.headers.get('content-type');
+        mimeType = contentType || 'image/png';
+      } else {
+        throw new Error(`Invalid image format: must be a data URL or HTTP URL`);
+      }
 
       console.log(`Adding image ${i + 1}:`, { mimeType, dataLength: base64Data.length });
 
@@ -508,23 +531,32 @@ serve(async (req) => {
       // Also upload original input images to storage if present
       const originalImageUrls: string[] = [];
       if (inputImages && inputImages.length > 0) {
-        console.log(`Uploading ${inputImages.length} original images to storage...`);
+        console.log(`Processing ${inputImages.length} original images...`);
         for (let i = 0; i < inputImages.length; i++) {
           const inputImage = inputImages[i];
           if (inputImage.startsWith('data:image')) {
+            console.log(`Uploading original image ${i} to storage...`);
             const originalId = `${imageId}_original_${i}`;
             const originalUrl = await uploadToStorage(supabase, user.id, inputImage, originalId);
             originalImageUrls.push(originalUrl);
-          } else {
-            // Already a URL, just store it
+          } else if (inputImage.startsWith('http')) {
+            // Already a URL (storage or external), just store it
+            console.log(`Using existing URL for original image ${i}`);
             originalImageUrls.push(inputImage);
           }
         }
-      } else if (inputImage && inputImage.startsWith('data:image')) {
-        // Legacy single image support
-        const originalId = `${imageId}_original_0`;
-        const originalUrl = await uploadToStorage(supabase, user.id, inputImage, originalId);
-        originalImageUrls.push(originalUrl);
+      } else if (inputImage) {
+        if (inputImage.startsWith('data:image')) {
+          // Legacy single image support - base64
+          console.log('Uploading single original image to storage...');
+          const originalId = `${imageId}_original_0`;
+          const originalUrl = await uploadToStorage(supabase, user.id, inputImage, originalId);
+          originalImageUrls.push(originalUrl);
+        } else if (inputImage.startsWith('http')) {
+          // Already a URL
+          console.log('Using existing URL for single original image');
+          originalImageUrls.push(inputImage);
+        }
       }
 
       result.originalImageUrls = originalImageUrls.length > 0 ? originalImageUrls : undefined;
