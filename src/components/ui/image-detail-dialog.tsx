@@ -44,23 +44,27 @@ export function ImageDetailDialog({
         </DialogHeader>
 
         <div className="grid md:grid-cols-2 gap-6">
-          {/* Image Preview */}
+          {/* Image Preview Section */}
           <div className="space-y-4">
+            {/* Show original image if exists */}
             {image.original_image_url && (
-              <div>
-                <h3 className="text-sm font-semibold mb-2">Original Image</h3>
-                <div className="relative aspect-square w-full overflow-hidden rounded-lg border bg-muted mb-4">
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold">Original Input Image</h3>
+                <div className="relative aspect-square w-full overflow-hidden rounded-lg border bg-muted">
                   <img
                     src={image.original_image_url}
-                    alt="Original"
+                    alt="Original input"
                     className="w-full h-full object-contain"
                   />
                 </div>
               </div>
             )}
 
-            <div>
-              {image.original_image_url && <h3 className="text-sm font-semibold mb-2">Generated Result</h3>}
+            {/* Generated image */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">
+                {image.original_image_url ? 'AI Generated Result' : 'Generated Image'}
+              </h3>
               <div className="relative aspect-square w-full overflow-hidden rounded-lg border bg-muted">
                 <img
                   src={image.image_url}
@@ -140,11 +144,13 @@ export function ImageDetailDialog({
             )}
 
             <div>
-              <h3 className="text-sm font-semibold mb-2">Details</h3>
+              <h3 className="text-sm font-semibold mb-2">Generation Info</h3>
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Type:</span>
-                  <span>{image.generation_type || 'text2img'}</span>
+                  <Badge variant={image.generation_type === 'img2img' ? 'default' : 'secondary'}>
+                    {image.generation_type === 'img2img' ? 'Image-to-Image' : 'Text-to-Image'}
+                  </Badge>
                 </div>
                 {image.width && image.height && (
                   <div className="flex justify-between">
@@ -156,6 +162,12 @@ export function ImageDetailDialog({
                   <span className="text-muted-foreground">Created:</span>
                   <span>{new Date(image.created_at).toLocaleDateString()}</span>
                 </div>
+                {image.original_image_url && (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Has Original:</span>
+                    <span className="text-green-600">✓ Yes</span>
+                  </div>
+                )}
               </div>
             </div>
 

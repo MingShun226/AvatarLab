@@ -25,12 +25,20 @@ export interface GenerationProgress {
 
 export interface GeneratedImage {
   id: string;
+  user_id?: string;
   prompt: string;
+  negative_prompt?: string;
   image_url: string;
+  original_image_url?: string;
   provider: string;
   model?: string;
   parameters?: any;
+  generation_type?: string;
+  width?: number;
+  height?: number;
+  is_favorite?: boolean;
   created_at: string;
+  updated_at?: string;
 }
 
 /**
