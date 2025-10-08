@@ -7,6 +7,47 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, GET, OPTIONS, PUT, DELETE',
 };
 
+// Helper: Upload base64 image to Supabase Storage
+async function uploadToStorage(
+  supabase: any,
+  userId: string,
+  base64Image: string,
+  imageId: string
+): Promise<string> {
+  // Extract image data from base64
+  const base64Data = base64Image.includes('base64,')
+    ? base64Image.split('base64,')[1]
+    : base64Image;
+
+  // Convert base64 to binary
+  const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+
+  // Generate filename with timestamp
+  const timestamp = Date.now();
+  const filename = `${userId}/${imageId}_${timestamp}.png`;
+
+  // Upload to storage
+  const { data, error } = await supabase.storage
+    .from('generated-images')
+    .upload(filename, binaryData, {
+      contentType: 'image/png',
+      upsert: false
+    });
+
+  if (error) {
+    console.error('Storage upload error:', error);
+    throw new Error(`Failed to upload image: ${error.message}`);
+  }
+
+  // Get public URL
+  const { data: { publicUrl } } = supabase.storage
+    .from('generated-images')
+    .getPublicUrl(filename);
+
+  console.log('Image uploaded to storage:', publicUrl);
+  return publicUrl;
+}
+
 // Helper function to get API key (user's key or platform key)
 async function getApiKey(
   supabase: any,
@@ -166,29 +207,41 @@ async function generateWithKieAI(prompt: string, parameters: any, apiKey: string
   };
 }
 
-async function generateWithGemini(prompt: string, parameters: any, apiKey: string, inputImage?: string) {
-  console.log('Generating with Google Gemini (Nano Banana):', { prompt, hasImage: !!inputImage });
+async function generateWithGemini(prompt: string, parameters: any, apiKey: string, inputImage?: string, inputImages?: string[]) {
+  console.log('Generating with Google Gemini (Nano Banana):', {
+    prompt,
+    hasImage: !!inputImage,
+    numImages: inputImages?.length || 0
+  });
 
   const parts: any[] = [];
 
-  // For img2img, add the input image first, then the prompt
-  if (inputImage) {
-    // Extract mime type from data URL
-    const mimeTypeMatch = inputImage.match(/^data:(image\/\w+);base64,/);
-    const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
-    const base64Data = inputImage.replace(/^data:image\/\w+;base64,/, '');
+  // Support multiple images for combination
+  const imagesToProcess = inputImages && inputImages.length > 0 ? inputImages : (inputImage ? [inputImage] : []);
 
-    console.log('Adding input image to request:', { mimeType, dataLength: base64Data.length });
+  // For img2img, add the input images first, then the prompt
+  if (imagesToProcess.length > 0) {
+    console.log(`Adding ${imagesToProcess.length} input image(s) to request`);
 
-    parts.push({
-      inlineData: {
-        mimeType,
-        data: base64Data
-      }
-    });
+    for (let i = 0; i < imagesToProcess.length; i++) {
+      const img = imagesToProcess[i];
+      // Extract mime type from data URL
+      const mimeTypeMatch = img.match(/^data:(image\/\w+);base64,/);
+      const mimeType = mimeTypeMatch ? mimeTypeMatch[1] : 'image/jpeg';
+      const base64Data = img.replace(/^data:image\/\w+;base64,/, '');
+
+      console.log(`Adding image ${i + 1}:`, { mimeType, dataLength: base64Data.length });
+
+      parts.push({
+        inlineData: {
+          mimeType,
+          data: base64Data
+        }
+      });
+    }
   }
 
-  // Add prompt after the image (for img2img) or as the only part (for text2img)
+  // Add prompt after the images (for img2img) or as the only part (for text2img)
   parts.push({ text: prompt });
 
   const requestBody = {
@@ -304,9 +357,16 @@ serve(async (req) => {
 
   try {
     const requestBody = await req.json();
-    console.log('Request body:', requestBody);
+    console.log('Request body received:', {
+      provider: requestBody.provider,
+      hasPrompt: !!requestBody.prompt,
+      hasInputImage: !!requestBody.inputImage,
+      hasInputImages: !!requestBody.inputImages,
+      numInputImages: requestBody.inputImages?.length || 0,
+      checkProgress: requestBody.checkProgress
+    });
 
-    const { prompt, provider = 'openai', parameters = {}, checkProgress = false, taskId, inputImage } = requestBody;
+    const { prompt, provider = 'openai', parameters = {}, checkProgress = false, taskId, inputImage, inputImages } = requestBody;
 
     // Initialize Supabase
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -417,7 +477,7 @@ serve(async (req) => {
           'google',
           Deno.env.get('GOOGLE_AI_API_KEY')
         );
-        result = await generateWithGemini(prompt, parameters, googleKey, inputImage);
+        result = await generateWithGemini(prompt, parameters, googleKey, inputImage, inputImages);
         break;
       }
 
@@ -428,47 +488,58 @@ serve(async (req) => {
         );
     }
 
-    // For sync providers, save the image immediately
+    // For sync providers, upload to storage but DON'T save to DB yet
+    // Let the frontend show preview first, then save on user confirmation
     if (result.status === 'completed' && result.imageUrl) {
-      const { data: savedImage, error: saveError } = await supabase
-        .from('generated_images')
-        .insert({
-          user_id: user.id,
-          prompt,
-          negative_prompt: parameters.negative_prompt || null,
-          image_url: result.imageUrl,
-          provider,
-          model: result.model,
-          parameters,
-          generation_type: 'text2img',
-          width: parameters.width || 1024,
-          height: parameters.height || 1024,
-        })
-        .select()
-        .single();
+      // Generate image ID before uploading
+      const imageId = crypto.randomUUID();
 
-      if (saveError) {
-        console.error('Error saving image:', saveError);
-        // Return error to help debug
-        return new Response(
-          JSON.stringify({
-            error: 'Failed to save image to database',
-            details: saveError.message,
-            code: saveError.code
-          }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      } else {
-        console.log('Image saved successfully:', savedImage.id);
+      // Upload to storage if it's a base64 image
+      let finalImageUrl = result.imageUrl;
+      if (result.imageUrl.startsWith('data:image')) {
+        console.log('Uploading base64 image to storage...');
+        finalImageUrl = await uploadToStorage(supabase, user.id, result.imageUrl, imageId);
       }
+
+      // Return the storage URL without saving to DB
+      // Frontend will show preview and save on user confirmation
+      result.imageUrl = finalImageUrl;
+
+      // Also upload original input images to storage if present
+      const originalImageUrls: string[] = [];
+      if (inputImages && inputImages.length > 0) {
+        console.log(`Uploading ${inputImages.length} original images to storage...`);
+        for (let i = 0; i < inputImages.length; i++) {
+          const inputImage = inputImages[i];
+          if (inputImage.startsWith('data:image')) {
+            const originalId = `${imageId}_original_${i}`;
+            const originalUrl = await uploadToStorage(supabase, user.id, inputImage, originalId);
+            originalImageUrls.push(originalUrl);
+          } else {
+            // Already a URL, just store it
+            originalImageUrls.push(inputImage);
+          }
+        }
+      } else if (inputImage && inputImage.startsWith('data:image')) {
+        // Legacy single image support
+        const originalId = `${imageId}_original_0`;
+        const originalUrl = await uploadToStorage(supabase, user.id, inputImage, originalId);
+        originalImageUrls.push(originalUrl);
+      }
+
+      result.originalImageUrls = originalImageUrls.length > 0 ? originalImageUrls : undefined;
     }
 
-    // Return result
+    // Return result (with taskId for async or imageUrl for sync)
     return new Response(
       JSON.stringify({
         success: true,
         provider,
-        ...result,
+        taskId: result.taskId || result.imageUrl, // For sync providers, imageUrl is the "taskId"
+        status: result.status,
+        imageUrl: result.imageUrl,
+        originalImageUrls: result.originalImageUrls,
+        model: result.model,
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

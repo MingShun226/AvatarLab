@@ -11,7 +11,8 @@ export interface GenerateImageParams {
   numImages?: number;
   guidanceScale?: number;
   style?: string;
-  inputImage?: string; // Base64 image for img2img
+  inputImage?: string; // Base64 image for img2img (deprecated, use inputImages)
+  inputImages?: string[]; // Multiple Base64 images for img2img combination
   strength?: number; // 0-1, how much to transform the input image
 }
 
@@ -41,17 +42,14 @@ export async function generateImage(params: GenerateImageParams): Promise<{ task
     throw new Error('Not authenticated');
   }
 
-  console.log('Sending request to edge function with:', {
-    provider: params.provider,
-    hasInputImage: !!params.inputImage,
-    promptLength: params.prompt.length,
-  });
+  // Removed verbose logging
 
   const { data, error } = await supabase.functions.invoke('generate-image-unified', {
     body: {
       prompt: params.prompt,
       provider: params.provider || 'openai',
-      inputImage: params.inputImage, // Base64 image for img2img
+      inputImage: params.inputImage, // Base64 image for img2img (deprecated)
+      inputImages: params.inputImages, // Multiple Base64 images for img2img combination
       parameters: {
         negative_prompt: params.negativePrompt,
         width: params.width || 1024,
@@ -64,15 +62,11 @@ export async function generateImage(params: GenerateImageParams): Promise<{ task
     },
   });
 
-  console.log('Edge function response:', { data, error });
-
   if (error) {
-    console.error('Edge function error details:', error);
     throw new Error(error.message || 'Failed to generate image');
   }
 
   if (data?.error) {
-    console.error('API error from edge function:', data);
     throw new Error(`${data.error}${data.details ? ': ' + data.details : ''}`);
   }
 
@@ -148,12 +142,16 @@ export async function saveGeneratedImage(
   prompt: string,
   provider: string,
   model?: string,
-  parameters?: any
+  parameters?: any,
+  originalImageUrls?: string[]
 ): Promise<GeneratedImage> {
   const session = await supabase.auth.getSession();
   if (!session.data.session) {
     throw new Error('Not authenticated');
   }
+
+  // Determine generation type based on whether there are original images
+  const generationType = originalImageUrls && originalImageUrls.length > 0 ? 'img2img' : 'text2img';
 
   const { data, error } = await supabase
     .from('generated_images')
@@ -162,10 +160,11 @@ export async function saveGeneratedImage(
       prompt,
       negative_prompt: parameters?.negative_prompt || null,
       image_url: imageUrl,
+      original_image_url: originalImageUrls && originalImageUrls.length > 0 ? originalImageUrls[0] : null,
       provider,
       model,
       parameters,
-      generation_type: 'text2img',
+      generation_type: generationType,
       width: parameters?.width || 1024,
       height: parameters?.height || 1024,
     })
@@ -254,6 +253,26 @@ export async function toggleFavorite(imageId: string, isFavorite: boolean): Prom
  */
 export async function downloadImage(imageUrl: string, filename: string): Promise<void> {
   try {
+    // For Supabase storage URLs, download directly
+    if (imageUrl.includes('supabase.co/storage')) {
+      const response = await fetch(imageUrl);
+      if (!response.ok) {
+        throw new Error('Failed to download image');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      return;
+    }
+
+    // For external URLs, use proxy
     const session = await supabase.auth.getSession();
     if (!session.data.session) {
       throw new Error('Not authenticated');
