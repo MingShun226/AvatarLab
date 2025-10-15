@@ -64,9 +64,6 @@ export const chatbotService = {
         0.7 // Similarity threshold
       );
 
-      console.log(`RAG Search: Found ${ragResults.totalFound} relevant chunks in ${ragResults.searchTime}ms`);
-      console.log(`Using model: ${model} with max_tokens: ${this.getMaxTokensForModel(model)}`);
-
       // Get basic knowledge base info (for files without RAG processing)
       const knowledgeBase = await this.getKnowledgeBaseContent(userId, avatarContext.id);
 
@@ -117,12 +114,24 @@ export const chatbotService = {
         }
       ];
 
-      // Call OpenAI API with function calling support
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      // Get Supabase session for authentication
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session) {
+        throw new Error('Not authenticated. Please sign in.');
+      }
+
+      // Call OpenAI API via Supabase Edge Function (to avoid CORS issues)
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL not configured');
+      }
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/chat-completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
+          'Authorization': `Bearer ${session.access_token}`
         },
         body: JSON.stringify({
           model: modelToUse,
@@ -179,11 +188,11 @@ export const chatbotService = {
             });
 
             // Make a second API call with the function result
-            const secondResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+            const secondResponse = await fetch(`${supabaseUrl}/functions/v1/chat-completions`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
+                'Authorization': `Bearer ${session.access_token}`
               },
               body: JSON.stringify({
                 model: modelToUse,

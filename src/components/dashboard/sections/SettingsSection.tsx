@@ -191,13 +191,13 @@ const SettingsSection = () => {
                       <SelectValue placeholder="Select a service..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="openai">OpenAI (DALL-E, GPT, etc.)</SelectItem>
-                      <SelectItem value="stability">Stability AI (Image Generation)</SelectItem>
-                      <SelectItem value="kie-ai">KIE AI (Flux Models)</SelectItem>
+                      <SelectItem value="OpenAI">OpenAI (DALL-E, GPT, etc.)</SelectItem>
+                      <SelectItem value="Stability">Stability AI (Image Generation)</SelectItem>
+                      <SelectItem value="KIE-AI">KIE AI (Flux Models)</SelectItem>
                       <SelectItem value="elevenlabs">ElevenLabs (Voice)</SelectItem>
-                      <SelectItem value="replicate">Replicate (Various Models)</SelectItem>
-                      <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
-                      <SelectItem value="google">Google (Gemini)</SelectItem>
+                      <SelectItem value="Replicate">Replicate (Various Models)</SelectItem>
+                      <SelectItem value="Anthropic">Anthropic (Claude)</SelectItem>
+                      <SelectItem value="Google">Google (Gemini)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

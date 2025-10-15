@@ -89,6 +89,10 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
     };
 
     checkApiKeyStatus();
+
+    // Check API key status every 5 seconds
+    const interval = setInterval(checkApiKeyStatus, 5000);
+    return () => clearInterval(interval);
   }, [user]);
 
   // Load available versions when avatar changes
@@ -128,7 +132,12 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
       if (savedHistory) {
         try {
           const parsed = JSON.parse(savedHistory);
-          setMessages(parsed.messages || []);
+          // Convert timestamp strings back to Date objects
+          const messagesWithDates = (parsed.messages || []).map((msg: Message) => ({
+            ...msg,
+            timestamp: new Date(msg.timestamp)
+          }));
+          setMessages(messagesWithDates);
           setConversationHistory(parsed.conversationHistory || []);
         } catch (error) {
           console.error('Failed to load chat history:', error);
@@ -295,8 +304,9 @@ export const TestChatSimple: React.FC<TestChatSimpleProps> = ({ selectedAvatar }
     });
   };
 
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const formatTime = (date: Date | string) => {
+    const dateObj = date instanceof Date ? date : new Date(date);
+    return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
   const handleFeedback = async (messageId: string, feedback: 'good' | 'bad') => {
