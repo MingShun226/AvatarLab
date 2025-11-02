@@ -1306,46 +1306,88 @@ ${extractedContent.substring(0, 8000)}${extractedContent.length > 8000 ? '\n...[
     // Build detailed analysis summary with examples
     const analysisWithExamples = this.buildAnalysisSummary(conversationAnalysis, extractedContent);
 
-    const prompt = `You are an expert AI conversation designer specializing in INCREMENTAL prompt enhancement and behavioral cloning.
+    const prompt = `You are an expert AI prompt engineer specializing in INTELLIGENT prompt refinement and behavioral improvement.
 
-CURRENT AVATAR SYSTEM PROMPT (PRESERVE 100% - COPY EXACTLY AS-IS):
+CURRENT AVATAR SYSTEM PROMPT:
 ${currentSystemPrompt || 'You are a helpful AI assistant. Respond in a friendly and helpful manner.'}
 
-NEW USER'S TRAINING INSTRUCTIONS:
+USER'S TRAINING REQUEST:
 ${trainingInstructions || 'Learn from the conversation examples provided and adopt the communication style demonstrated.'}
 
 ${analysisWithExamples}
 
-CRITICAL TASK - INCREMENTAL UPDATE ONLY:
-Your job is to COPY THE ENTIRE EXISTING PROMPT and ADD/UPDATE training instructions. DO NOT regenerate or rewrite the existing content.
+INTELLIGENT PROMPT REFINEMENT TASK:
 
-STEP-BY-STEP PROCESS:
-1. **COPY 100%** of the existing prompt above - every single character, including all previous training sections
-2. **CHECK FOR CONFLICTS**: Compare new training with existing training sections
-   - If there's conflict (e.g., new says "be casual" but old says "be formal"), REPLACE only that specific section
-   - If no conflict, APPEND as new section
-3. **ADD NEW TRAINING** at the end with clear, highly visible markers
+You must analyze the user's training request and decide what type of changes are needed:
 
-TRAINING SECTION FORMAT (CRITICAL FOR AI TO FOLLOW):
-Use this EXACT format for maximum AI visibility and priority:
+1. **STRUCTURAL CHANGES** (User wants to modify the avatar's core identity):
+   - Backstory changes (e.g., "change the background story to...", "make the avatar a...")
+   - Personality changes (e.g., "make them more outgoing", "change personality to...")
+   - Demographic changes (e.g., "make them younger", "change origin to...")
+   - Identity changes (e.g., "change the name", "make them a different character")
+   → For these: REWRITE the affected sections completely while preserving unrelated parts
+
+2. **BEHAVIORAL CHANGES** (User wants to improve conversation style):
+   - Conversation style from examples (e.g., "learn from these conversations")
+   - Tone/manner adjustments (e.g., "be more casual", "use more emojis")
+   - Response patterns (e.g., "answer questions like this")
+   → For these: ADD training sections with few-shot examples and style rules
+
+3. **MIXED CHANGES** (Combination of both):
+   - Analyze which parts need rewriting vs which need additions
+   - Apply appropriate strategy to each section
+
+DECISION PROCESS:
+1. Read the user's training instructions carefully
+2. Determine if they want to:
+   - **REPLACE** content (backstory, personality, identity) → Rewrite those sections
+   - **ENHANCE** behavior (conversation style) → Add training sections
+   - **BOTH** → Do both strategically
+
+3. Check conversation examples:
+   - If examples show a DIFFERENT character/personality than current → Suggest REPLACE
+   - If examples show SAME character with better style → Suggest ENHANCE
+
+OUTPUT REQUIREMENTS:
+
+Based on your analysis, create an improved prompt that either:
+- **REWRITES** affected sections if user wants structural changes
+- **ADDS** training sections if user wants behavioral enhancements
+- **DOES BOTH** if the request is mixed
+
+For behavioral training additions, use this format:
 
 ═══════════════════════════════════════════════════════
-🎯 PRIORITY TRAINING INSTRUCTIONS - FOLLOW THESE FIRST 🎯
+🎯 TRAINING: [Brief Description] - ${new Date().toLocaleDateString()} 🎯
 ═══════════════════════════════════════════════════════
 
-[Training content with numbered rules]
+[Numbered rules and guidelines]
 
-IMPORTANT: Place the NEWEST training at the TOP of training sections (reverse chronological order).
-This ensures the AI sees and follows the latest instructions FIRST.
+Few-shot examples:
+User: "[example]"
+You: "[desired response]"
+(Demonstrates: [what this teaches])
+
+═══════════════════════════════════════════════════════
+
+CRITICAL RULES:
+1. **ANALYZE USER INTENT FIRST** - Don't just append, understand what they want
+2. **STRUCTURAL CHANGES** - Rewrite backstory/personality/identity sections completely if requested
+3. **BEHAVIORAL TRAINING** - Add few-shot examples and style rules
+4. **PRESERVE WHAT'S NOT MENTIONED** - Keep unrelated parts unchanged
+5. **BE INTELLIGENT** - If user says "change backstory to X", actually change it, don't just add a note
+6. **CONFLICT RESOLUTION** - If new training contradicts old, the new one WINS
 
 Return ONLY valid JSON:
 {
-  "enhanced_system_prompt": "Complete existing prompt (100% copied) + new training section with strong markers",
+  "system_prompt": "The refined/improved system prompt based on intelligent analysis of user's request",
+  "change_type": "structural | behavioral | mixed",
   "changes_summary": {
-    "sections_added": ["list of new sections added"],
-    "sections_updated": ["list of sections that were updated/replaced"],
-    "sections_unchanged": ["list of sections kept as-is"],
-    "conflict_resolution": "description of how conflicts were resolved"
+    "intent_detected": "what the user wanted to achieve",
+    "sections_rewritten": ["backstory", "personality", etc. - if REPLACED"],
+    "sections_added": ["training rules", "few-shot examples", etc. - if ADDED"],
+    "sections_preserved": ["what was kept unchanged"],
+    "reasoning": "why you made these specific changes"
   },
   "few_shot_examples": [
     {
@@ -1365,43 +1407,20 @@ Return ONLY valid JSON:
     "response_length": "typical length in words",
     "sentence_structure": "observed pattern with example"
   },
-  "improvement_notes": "What was added/changed in this training iteration"
+  "improvement_notes": "What was changed and why"
 }
 
-EXAMPLE OUTPUT STRUCTURE:
-[Original avatar identity and personality - copied exactly]
+EXAMPLE 1 - STRUCTURAL CHANGE (User wants new backstory):
+User Request: "Change the backstory - make them a software engineer from Silicon Valley"
+Output: Rewrite the backstory section completely, keep personality/other sections if not mentioned
 
-═══════════════════════════════════════════════════════
-🎯 PRIORITY TRAINING INSTRUCTIONS - FOLLOW THESE FIRST 🎯
-═══════════════════════════════════════════════════════
+EXAMPLE 2 - BEHAVIORAL CHANGE (User provides conversation examples):
+User Request: "Learn from these conversations" + examples
+Output: Keep all existing content, ADD training section at end with few-shot examples
 
-TRAINING SESSION 3 (${new Date().toLocaleDateString()}) - **HIGHEST PRIORITY**
-1. [New instruction from this session]
-2. [Another new instruction]
-
-Few-shot examples:
-User: "[example]"
-You: "[desired response]"
-
----
-
-TRAINING SESSION 2 (Previous) - Follow if not contradicted above
-[Previous training content - preserved]
-
----
-
-TRAINING SESSION 1 (Original) - Follow if not contradicted above
-[Original training content - preserved]
-
-═══════════════════════════════════════════════════════
-
-CRITICAL RULES:
-- COPY the entire existing prompt first (100% preservation)
-- Place NEWEST training at the TOP with strong visual markers
-- Use the exact format above for training sections
-- Mark training sections with ═══ borders and 🎯 emoji for high visibility
-- Number all training rules clearly
-- Include few-shot examples in each training section`;
+EXAMPLE 3 - MIXED (User wants both):
+User Request: "Make them more outgoing and change their job to teacher"
+Output: REWRITE personality to be outgoing, REWRITE job/backstory, ADD training for behavioral changes`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -1414,7 +1433,7 @@ CRITICAL RULES:
         messages: [
           {
             role: 'system',
-            content: 'You are an expert AI prompt engineer specializing in few-shot learning and behavioral cloning. You preserve original content 100% while adding powerful conversation training through concrete examples.'
+            content: 'You are an expert AI prompt engineer specializing in intelligent prompt refinement. You can detect user intent to either REWRITE core sections (backstory, personality, identity) or ENHANCE behavior (conversation style). You analyze what the user wants and apply the appropriate strategy - not just blindly appending content.'
           },
           { role: 'user', content: prompt }
         ],
@@ -1443,20 +1462,17 @@ CRITICAL RULES:
       // Try to parse as JSON first
       const parsed = JSON.parse(cleanedText);
 
-      // Transform the new format to the expected format
-      if (parsed.enhanced_system_prompt) {
-        return {
-          system_prompt: parsed.enhanced_system_prompt,
-          personality_traits: [],
-          behavior_rules: parsed.behavior_rules || [],
-          response_style: parsed.response_style || {},
-          few_shot_examples: parsed.few_shot_examples || [],
-          changes_summary: parsed.changes_summary || {},
-          improvement_notes: parsed.improvement_notes || parsed.changes_summary?.conflict_resolution || 'Incremental training update applied'
-        };
-      }
-
-      return parsed;
+      // Return the parsed result in the expected format
+      return {
+        system_prompt: parsed.system_prompt || parsed.enhanced_system_prompt || currentSystemPrompt,
+        change_type: parsed.change_type || 'behavioral',
+        personality_traits: [],
+        behavior_rules: parsed.behavior_rules || [],
+        response_style: parsed.response_style || {},
+        few_shot_examples: parsed.few_shot_examples || [],
+        changes_summary: parsed.changes_summary || {},
+        improvement_notes: parsed.improvement_notes || parsed.changes_summary?.reasoning || 'Prompt refinement applied'
+      };
     } catch (parseError) {
       console.error('JSON parsing error:', parseError);
 
@@ -1466,20 +1482,17 @@ CRITICAL RULES:
         try {
           const parsed = JSON.parse(jsonMatch[0]);
 
-          // Transform the new format to the expected format
-          if (parsed.enhanced_system_prompt) {
-            return {
-              system_prompt: parsed.enhanced_system_prompt,
-              personality_traits: [],
-              behavior_rules: parsed.behavior_rules || [],
-              response_style: parsed.response_style || {},
-              few_shot_examples: parsed.few_shot_examples || [],
-              changes_summary: parsed.changes_summary || {},
-              improvement_notes: parsed.improvement_notes || parsed.changes_summary?.conflict_resolution || 'Incremental training update applied'
-            };
-          }
-
-          return parsed;
+          // Return in expected format
+          return {
+            system_prompt: parsed.system_prompt || parsed.enhanced_system_prompt || currentSystemPrompt,
+            change_type: parsed.change_type || 'behavioral',
+            personality_traits: [],
+            behavior_rules: parsed.behavior_rules || [],
+            response_style: parsed.response_style || {},
+            few_shot_examples: parsed.few_shot_examples || [],
+            changes_summary: parsed.changes_summary || {},
+            improvement_notes: parsed.improvement_notes || parsed.changes_summary?.reasoning || 'Prompt refinement applied'
+          };
         } catch {
           // Still failed, fall back to extracting system prompt from the text
           console.error('Failed to parse extracted JSON');
