@@ -27,6 +27,7 @@ import {
 
 import { TrainingService } from '../../../services/trainingService';
 import { FineTuneService } from '../../../services/fineTuneService';
+import { PromptModificationInterface } from './PromptModificationInterface';
 
 interface SimplifiedTrainingInterfaceProps {
   avatarId: string;
@@ -543,8 +544,18 @@ export function SimplifiedTrainingInterface({
         </div>
       )}
 
-      {/* Step 1: Upload & Process */}
-      {currentStep === 1 && (
+      {/* Prompt-Based Training - Direct Modification Interface */}
+      {trainingType === 'prompt' && (
+        <PromptModificationInterface
+          avatarId={avatarId}
+          avatarName={avatarName}
+          userId={userId}
+          onModificationComplete={onTrainingComplete}
+        />
+      )}
+
+      {/* Fine-Tuning Training - Upload & Process Flow */}
+      {trainingType === 'finetune' && currentStep === 1 && (
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -712,8 +723,8 @@ export function SimplifiedTrainingInterface({
         </Card>
       )}
 
-      {/* Step 2: Training Actions */}
-      {currentStep === 2 && (
+      {/* Step 2: Training Actions (Fine-Tuning Only) */}
+      {trainingType === 'finetune' && currentStep === 2 && (
         <>
           {/* Success Message */}
           <Alert className="bg-green-50 border-green-200">

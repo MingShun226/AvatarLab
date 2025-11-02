@@ -405,6 +405,169 @@ export class TrainingService {
   }
 
   // =============================================
+  // PROMPT MODIFICATION (SURGICAL EDITS)
+  // =============================================
+
+  /**
+   * Apply targeted modifications to specific sections of the prompt
+   * This is for prompt-based training where user describes changes to make
+   * NO conversation examples, just surgical edits to the prompt
+   */
+  static async applyPromptModification(
+    trainingDataId: string,
+    userId: string,
+    avatarId: string,
+    modificationInstructions: string,
+    currentPrompt: string
+  ): Promise<any> {
+    const apiKey = await apiKeyService.getDecryptedApiKey(userId, 'OpenAI');
+    if (!apiKey) {
+      throw new Error('OpenAI API key required for prompt modification');
+    }
+
+    // Call AI to make surgical edits
+    const prompt = `You are an expert prompt editor specializing in SURGICAL, TARGETED edits.
+
+CURRENT PROMPT:
+${currentPrompt}
+
+USER'S MODIFICATION REQUEST:
+${modificationInstructions}
+
+YOUR TASK - SURGICAL EDITING ONLY:
+
+1. **ANALYZE** what the user wants to change:
+   - Backstory? Personality? Age? Location? Interests?
+   - Be very specific about what sections are affected
+
+2. **PRESERVE EVERYTHING ELSE**:
+   - If user says "change backstory", ONLY touch backstory
+   - If user says "update age", ONLY touch age-related text
+   - Keep ALL other sections 100% unchanged
+
+3. **MAKE MINIMAL CHANGES**:
+   - Find the exact section that needs changing
+   - Replace ONLY that section with the new content
+   - Don't rewrite sections not mentioned
+
+4. **NO ADDITIONS unless requested**:
+   - Don't add training sections
+   - Don't add few-shot examples
+   - Don't add new rules
+   - ONLY modify what user explicitly asked to change
+
+EXAMPLES:
+
+User Request: "Change age to 25"
+Action: Find age mention → Replace with 25 → Keep everything else
+
+User Request: "Make backstory about being a teacher"
+Action: Find backstory section → Rewrite to teacher story → Keep personality, age, etc.
+
+User Request: "Update personality to be more friendly"
+Action: Find personality section → Modify to be friendly → Keep backstory, age, etc.
+
+Return ONLY valid JSON:
+{
+  "modified_prompt": "The prompt with ONLY the requested sections changed",
+  "sections_modified": ["list of specific sections you changed"],
+  "sections_preserved": ["list of sections kept unchanged"],
+  "change_summary": "brief description of what was changed"
+}`;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a surgical prompt editor. You make MINIMAL, TARGETED changes to only the sections requested. You preserve everything else 100%. You do NOT add training sections or examples unless explicitly asked.'
+          },
+          { role: 'user', content: prompt }
+        ],
+        max_tokens: 8000,
+        temperature: 0.1
+      })
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(`Modification API error: ${error.error?.message || response.statusText}`);
+    }
+
+    const data = await response.json();
+    const resultText = data.choices[0]?.message?.content || '{}';
+
+    try {
+      let cleanedText = resultText.trim();
+      if (cleanedText.startsWith('```json')) {
+        cleanedText = cleanedText.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+      } else if (cleanedText.startsWith('```')) {
+        cleanedText = cleanedText.replace(/^```\s*/, '').replace(/\s*```$/, '');
+      }
+
+      const parsed = JSON.parse(cleanedText);
+      const modifiedPrompt = parsed.modified_prompt || currentPrompt;
+
+      // Get existing versions
+      const existingVersions = await this.getPromptVersions(avatarId, userId);
+      const versionNumber = `v${existingVersions.length + 1}.0`;
+
+      // Create new version with the modified prompt
+      const newVersion = await this.createPromptVersion({
+        avatar_id: avatarId,
+        user_id: userId,
+        training_data_id: trainingDataId,
+        parent_version_id: existingVersions.find(v => v.is_active)?.id,
+        version_number: versionNumber,
+        version_name: `Prompt Modification ${new Date().toLocaleDateString()}`,
+        description: parsed.change_summary || 'Targeted prompt modifications',
+        system_prompt: modifiedPrompt,
+        personality_traits: [],
+        behavior_rules: [],
+        response_style: {},
+        changes_from_parent: {
+          modification_type: 'surgical_edit',
+          sections_modified: parsed.sections_modified || [],
+          sections_preserved: parsed.sections_preserved || [],
+          user_instructions: modificationInstructions
+        },
+        inheritance_type: 'incremental',
+        is_active: false,
+        is_published: false
+      });
+
+      // Update training data
+      await this.updateTrainingData(trainingDataId, {
+        status: 'completed',
+        generated_prompts: {
+          system_prompt: modifiedPrompt,
+          sections_modified: parsed.sections_modified,
+          sections_preserved: parsed.sections_preserved
+        },
+        improvement_notes: parsed.change_summary,
+        completed_at: new Date().toISOString()
+      });
+
+      return {
+        version: newVersion,
+        modified_prompt: modifiedPrompt,
+        sections_modified: parsed.sections_modified || [],
+        change_summary: parsed.change_summary || 'Modifications applied'
+      };
+
+    } catch (error) {
+      console.error('Error parsing modification result:', error);
+      throw new Error('Failed to parse modification result');
+    }
+  }
+
+  // =============================================
   // AI PROCESSING
   // =============================================
 
