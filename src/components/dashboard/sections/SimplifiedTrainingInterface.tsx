@@ -43,6 +43,9 @@ export function SimplifiedTrainingInterface({
 }: SimplifiedTrainingInterfaceProps) {
   const { toast } = useToast();
 
+  // Step 0: Training Type Selection
+  const [trainingType, setTrainingType] = useState<'prompt' | 'finetune' | null>(null);
+
   // Step 1: Upload files
   const [files, setFiles] = useState<File[]>([]);
   const [textInput, setTextInput] = useState('');
@@ -378,7 +381,7 @@ export function SimplifiedTrainingInterface({
   ) : null;
 
   // Current step calculation
-  const currentStep = !trainingSessionId ? 1 : 2;
+  const currentStep = !trainingType ? 0 : !trainingSessionId ? 1 : 2;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -386,39 +389,184 @@ export function SimplifiedTrainingInterface({
       <div className="text-center">
         <h2 className="text-3xl font-bold">Train {avatarName}</h2>
         <p className="text-gray-600 mt-2">
-          Follow these simple steps to teach your avatar
+          {currentStep === 0 ? 'Choose your training method' : 'Follow these simple steps to teach your avatar'}
         </p>
       </div>
 
       {/* Progress Indicator */}
-      <div className="flex items-center justify-center gap-4">
-        <div className={`flex items-center gap-2 ${currentStep >= 1 ? 'text-blue-600' : 'text-gray-400'}`}>
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-            currentStep >= 1 ? 'bg-blue-600 text-white' : 'bg-gray-200'
-          }`}>
-            {currentStep > 1 ? <CheckCircle2 className="w-5 h-5" /> : '1'}
+      {currentStep > 0 && (
+        <div className="flex items-center justify-center gap-4">
+          <div className={`flex items-center gap-2 ${currentStep >= 1 ? 'text-blue-600' : 'text-gray-400'}`}>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+              currentStep >= 1 ? 'bg-blue-600 text-white' : 'bg-gray-200'
+            }`}>
+              {currentStep > 1 ? <CheckCircle2 className="w-5 h-5" /> : '1'}
+            </div>
+            <span className="font-medium">Upload & Process</span>
           </div>
-          <span className="font-medium">Upload & Process</span>
-        </div>
-        <ArrowRight className="w-5 h-5 text-gray-400" />
-        <div className={`flex items-center gap-2 ${currentStep >= 2 ? 'text-blue-600' : 'text-gray-400'}`}>
-          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-            currentStep >= 2 ? 'bg-blue-600 text-white' : 'bg-gray-200'
-          }`}>
-            2
+          <ArrowRight className="w-5 h-5 text-gray-400" />
+          <div className={`flex items-center gap-2 ${currentStep >= 2 ? 'text-blue-600' : 'text-gray-400'}`}>
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+              currentStep >= 2 ? 'bg-blue-600 text-white' : 'bg-gray-200'
+            }`}>
+              2
+            </div>
+            <span className="font-medium">
+              {trainingType === 'prompt' ? 'Apply Changes' : 'Choose Training'}
+            </span>
           </div>
-          <span className="font-medium">Choose Training</span>
         </div>
-      </div>
+      )}
+
+      {/* Step 0: Training Type Selection */}
+      {currentStep === 0 && (
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Prompt-Based Training */}
+          <Card
+            className="border-2 hover:border-blue-500 transition-all cursor-pointer transform hover:scale-105"
+            onClick={() => setTrainingType('prompt')}
+          >
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-blue-100 rounded-lg">
+                    <Zap className="w-8 h-8 text-blue-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-xl">Prompt-Based Training</CardTitle>
+                    <Badge variant="secondary" className="mt-1">Quick & Free</Badge>
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-gray-600">
+                Improve your chatbot by enhancing its system prompt with conversation examples and instructions.
+              </p>
+
+              <div className="space-y-2 text-sm">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <span>Instant results (30 seconds)</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <span>Completely free - no costs</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <span>Good for testing & quick improvements</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                  <span>Moderate quality improvement (30-50% style match)</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                  <span>Works with any number of examples</span>
+                </div>
+              </div>
+
+              <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <p className="font-medium text-blue-900 text-sm mb-2">Best for:</p>
+                <ul className="text-xs text-blue-700 space-y-1 list-disc list-inside">
+                  <li>Quick personality adjustments</li>
+                  <li>Testing different conversation styles</li>
+                  <li>Adding specific instructions or rules</li>
+                  <li>When you have limited training data</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Fine-Tuning Training */}
+          <Card
+            className="border-2 hover:border-purple-500 transition-all cursor-pointer transform hover:scale-105"
+            onClick={() => setTrainingType('finetune')}
+          >
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-3 bg-purple-100 rounded-lg">
+                    <Sparkles className="w-8 h-8 text-purple-600" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-xl">Fine-Tuning Training</CardTitle>
+                    <Badge className="mt-1 bg-purple-600">Premium</Badge>
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-gray-600">
+                Train a custom AI model that deeply learns your conversation style and personality on OpenAI's servers.
+              </p>
+
+              <div className="space-y-2 text-sm">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <span>Best quality results (70-90% style match)</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <span>Real machine learning model training</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" />
+                  <span>Production-ready, consistent responses</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                  <span>Takes 10-60 minutes to complete</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                  <span>Costs $3-$20 (depending on model & data)</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
+                  <span>Requires at least 10 training examples</span>
+                </div>
+              </div>
+
+              <div className="p-4 bg-purple-50 rounded-lg border border-purple-200">
+                <p className="font-medium text-purple-900 text-sm mb-2">Best for:</p>
+                <ul className="text-xs text-purple-700 space-y-1 list-disc list-inside">
+                  <li>Production chatbots with consistent style</li>
+                  <li>Complex personality replication</li>
+                  <li>When you have 10+ quality examples</li>
+                  <li>Maximum quality and authenticity</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Step 1: Upload & Process */}
       {currentStep === 1 && (
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Upload className="w-5 h-5" />
-              Step 1: Upload Your Conversations
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Upload className="w-5 h-5" />
+                Step 1: Upload Your Conversations
+              </CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setTrainingType(null)}
+              >
+                Change Training Type
+              </Button>
+            </div>
+            <p className="text-sm text-gray-600 mt-2">
+              Selected: {trainingType === 'prompt' ? (
+                <Badge className="bg-blue-600"><Zap className="w-3 h-3 mr-1 inline" /> Prompt-Based Training</Badge>
+              ) : (
+                <Badge className="bg-purple-600"><Sparkles className="w-3 h-3 mr-1 inline" /> Fine-Tuning Training</Badge>
+              )}
+            </p>
           </CardHeader>
           <CardContent className="space-y-4">
             <Alert>
@@ -564,7 +712,7 @@ export function SimplifiedTrainingInterface({
         </Card>
       )}
 
-      {/* Step 2: Choose Training Method */}
+      {/* Step 2: Training Actions */}
       {currentStep === 2 && (
         <>
           {/* Success Message */}
@@ -572,9 +720,39 @@ export function SimplifiedTrainingInterface({
             <CheckCircle2 className="h-4 w-4 text-green-600" />
             <AlertDescription className="text-green-900">
               Successfully extracted <strong>{stats?.total || extractedExamples} conversation examples</strong>!
-              <br />Now choose your training method below.
+              <br />
+              {trainingType === 'prompt'
+                ? 'Ready to apply prompt-based improvements.'
+                : 'Now choose your fine-tuning options below.'}
             </AlertDescription>
           </Alert>
+
+          {/* Show selected training type */}
+          <div className="flex items-center justify-center gap-2 p-3 bg-gray-50 rounded-lg">
+            <span className="text-sm text-gray-600">Training Type:</span>
+            <Badge className={trainingType === 'prompt' ? 'bg-blue-600' : 'bg-purple-600'}>
+              {trainingType === 'prompt' ? (
+                <><Zap className="w-3 h-3 mr-1 inline" /> Prompt-Based Training</>
+              ) : (
+                <><Sparkles className="w-3 h-3 mr-1 inline" /> Fine-Tuning Training</>
+              )}
+            </Badge>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setTrainingType(null);
+                setTrainingSessionId(null);
+                setExtractedExamples(0);
+                setFiles([]);
+                setTextInput('');
+                setInstructions('');
+              }}
+              className="ml-2 text-xs"
+            >
+              Change Type
+            </Button>
+          </div>
 
           {/* Active Training Jobs */}
           {activeJobs.length > 0 && (
@@ -687,70 +865,139 @@ export function SimplifiedTrainingInterface({
             </Card>
           </div>
 
-          {/* Training Options */}
-          <div className="grid md:grid-cols-2 gap-6">
-            {/* Quick Training */}
-            <Card className="border-2 hover:border-yellow-400 transition-colors cursor-pointer">
+          {/* Training Options - Different based on training type */}
+          {trainingType === 'prompt' ? (
+            /* Prompt-Based Training - Single Option */
+            <Card className="border-2 border-blue-400">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Zap className="w-6 h-6 text-yellow-500" />
-                    <CardTitle>Quick Training</CardTitle>
+                    <Zap className="w-6 h-6 text-blue-500" />
+                    <CardTitle>Apply Prompt-Based Training</CardTitle>
                   </div>
-                  <Badge variant="secondary">Free</Badge>
+                  <Badge variant="secondary">Free & Instant</Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
-                    <span>Instant results (30 seconds)</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
-                    <span>No cost</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
-                    <span>Good for testing & iteration</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 text-orange-500" />
-                    <span>Moderate quality (30-50% match)</span>
-                  </div>
+                <div className="p-4 bg-blue-50 rounded-lg text-sm">
+                  <p className="font-medium text-blue-900 mb-2">What will happen:</p>
+                  <ul className="text-blue-700 space-y-1 list-disc list-inside">
+                    <li>Your {extractedExamples || stats?.total || 0} conversation examples will be analyzed</li>
+                    <li>An enhanced system prompt will be created</li>
+                    <li>The prompt will include conversation style guidelines</li>
+                    <li>Your chatbot will reference these examples</li>
+                  </ul>
                 </div>
 
-                <div className="p-3 bg-yellow-50 rounded-lg text-sm">
-                  <p className="font-medium text-yellow-900">How it works:</p>
-                  <p className="text-yellow-700 mt-1">
-                    Creates enhanced instructions for the AI based on your examples.
-                    Fast and free!
-                  </p>
-                </div>
+                {isTraining && trainingMethod === 'quick' && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">{processingStep}</span>
+                      <span className="font-medium">{trainingProgress}%</span>
+                    </div>
+                    <Progress value={trainingProgress} />
+                  </div>
+                )}
 
                 <Button
                   onClick={handleQuickTraining}
                   disabled={isTraining}
-                  className="w-full bg-yellow-500 hover:bg-yellow-600"
+                  className="w-full bg-blue-600 hover:bg-blue-700"
                   size="lg"
                 >
                   {isTraining && trainingMethod === 'quick' ? (
                     <>
                       <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Training...
+                      Applying Training... {trainingProgress}%
                     </>
                   ) : (
                     <>
                       <Zap className="w-5 h-5 mr-2" />
-                      Start Quick Training
+                      Apply Prompt Training Now
                     </>
                   )}
                 </Button>
+
+                <p className="text-xs text-center text-gray-500">
+                  This will update your avatar's system prompt with enhanced instructions
+                </p>
               </CardContent>
             </Card>
+          ) : (
+            /* Fine-Tuning Training - Two Options */
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Quick Training for Fine-tune Type */}
+              <Card className="border-2 hover:border-yellow-400 transition-colors cursor-pointer">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Zap className="w-6 h-6 text-yellow-500" />
+                      <CardTitle>Quick Training</CardTitle>
+                    </div>
+                    <Badge variant="secondary">Free</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2 text-sm">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                      <span>Instant results (30 seconds)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                      <span>No cost</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-green-500" />
+                      <span>Good for testing first</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-orange-500" />
+                      <span>Moderate quality (30-50% match)</span>
+                    </div>
+                  </div>
 
-            {/* Deep Training */}
-            <Card className={`border-2 transition-colors ${
+                  <div className="p-3 bg-yellow-50 rounded-lg text-sm">
+                    <p className="font-medium text-yellow-900">How it works:</p>
+                    <p className="text-yellow-700 mt-1">
+                      Updates your chatbot's prompt with conversation examples.
+                      Try this first before paying for fine-tuning!
+                    </p>
+                  </div>
+
+                  {isTraining && trainingMethod === 'quick' && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-gray-600">{processingStep}</span>
+                        <span className="font-medium">{trainingProgress}%</span>
+                      </div>
+                      <Progress value={trainingProgress} />
+                    </div>
+                  )}
+
+                  <Button
+                    onClick={handleQuickTraining}
+                    disabled={isTraining}
+                    className="w-full bg-yellow-500 hover:bg-yellow-600"
+                    size="lg"
+                  >
+                    {isTraining && trainingMethod === 'quick' ? (
+                      <>
+                        <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                        Training...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-5 h-5 mr-2" />
+                        Try Quick Training First
+                      </>
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
+
+              {/* Deep Training */}
+              <Card className={`border-2 transition-colors ${
               eligibility?.eligible
                 ? 'hover:border-purple-400 cursor-pointer'
                 : 'opacity-60 cursor-not-allowed'
@@ -891,7 +1138,8 @@ export function SimplifiedTrainingInterface({
                 )}
               </CardContent>
             </Card>
-          </div>
+            </div>
+          )}
 
           {/* Replace Training Data Button */}
           <div className="text-center space-y-3">
