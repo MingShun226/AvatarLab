@@ -40,6 +40,8 @@ export function PromptModificationInterface({
   const { toast } = useToast();
 
   const [currentPrompt, setCurrentPrompt] = useState<string>('');
+  const [promptSource, setPromptSource] = useState<'active_version' | 'base_prompt'>('base_prompt');
+  const [activeVersionInfo, setActiveVersionInfo] = useState<string>('');
   const [showFullPrompt, setShowFullPrompt] = useState(false);
   const [isLoadingPrompt, setIsLoadingPrompt] = useState(true);
   const [modificationInstructions, setModificationInstructions] = useState('');
@@ -53,8 +55,22 @@ export function PromptModificationInterface({
   const loadCurrentPrompt = async () => {
     try {
       setIsLoadingPrompt(true);
-      const prompt = await TrainingService.getAvatarSystemPrompt(avatarId, userId);
-      setCurrentPrompt(prompt);
+
+      // First try to get the active version
+      const activeVersion = await TrainingService.getActivePromptVersion(avatarId, userId);
+
+      if (activeVersion && activeVersion.system_prompt) {
+        // Use active version's prompt
+        setCurrentPrompt(activeVersion.system_prompt);
+        setPromptSource('active_version');
+        setActiveVersionInfo(`${activeVersion.version_number} - ${activeVersion.version_name || 'Active Version'}`);
+      } else {
+        // Fallback to base avatar prompt if no active version
+        const basePrompt = await TrainingService.getAvatarSystemPrompt(avatarId, userId);
+        setCurrentPrompt(basePrompt);
+        setPromptSource('base_prompt');
+        setActiveVersionInfo('');
+      }
     } catch (error) {
       console.error('Error loading prompt:', error);
       toast({
@@ -157,9 +173,16 @@ export function PromptModificationInterface({
               <CardTitle className="flex items-center gap-2">
                 <Eye className="w-5 h-5" />
                 Current System Prompt
+                {promptSource === 'active_version' ? (
+                  <Badge className="ml-2 bg-green-600">Active Version</Badge>
+                ) : (
+                  <Badge variant="outline" className="ml-2">Base Prompt</Badge>
+                )}
               </CardTitle>
               <CardDescription className="mt-1">
-                Review your avatar's current prompt before making changes
+                {promptSource === 'active_version'
+                  ? `Showing: ${activeVersionInfo}`
+                  : 'Showing base avatar prompt (no trained versions active)'}
               </CardDescription>
             </div>
             <Button
