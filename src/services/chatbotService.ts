@@ -55,6 +55,29 @@ export const chatbotService = {
         throw new Error('No OpenAI API key found. Please add one in Settings > API Keys.');
       }
 
+      // Check if avatar has an active fine-tuned model
+      const { data: avatarProfile, error: avatarError } = await supabase
+        .from('avatars')
+        .select('active_fine_tuned_model, use_fine_tuned_model, base_model')
+        .eq('id', avatarContext.id)
+        .single();
+
+      if (avatarError) {
+        console.error('Error fetching avatar profile:', avatarError);
+      }
+
+      // Determine which model to use (priority: fine-tuned > provided > base > default)
+      let modelToUse = model;
+      if (avatarProfile?.use_fine_tuned_model && avatarProfile?.active_fine_tuned_model) {
+        modelToUse = avatarProfile.active_fine_tuned_model;
+        console.log('Using fine-tuned model:', modelToUse);
+      } else if (avatarProfile?.base_model) {
+        modelToUse = avatarProfile.base_model;
+      } else if (avatarContext.fineTunedModelId) {
+        // Legacy support for fineTunedModelId in context
+        modelToUse = avatarContext.fineTunedModelId;
+      }
+
       // Use RAG to find relevant content for the user's message
       const ragResults = await RAGService.searchRelevantChunks(
         message,
@@ -85,9 +108,6 @@ export const chatbotService = {
         ...conversationHistory.slice(-30), // Keep last 30 messages for context
         { role: 'user', content: message }
       ];
-
-      // Use fine-tuned model if available
-      const modelToUse = avatarContext.fineTunedModelId || model;
 
       // Define function tools for memory image retrieval
       const tools = [
@@ -162,6 +182,22 @@ export const chatbotService = {
       }
 
       const assistantMessage = data.choices[0].message;
+
+      // Track usage for fine-tuned models
+      if (avatarProfile?.use_fine_tuned_model && avatarProfile?.active_fine_tuned_model && data.usage) {
+        try {
+          await supabase.rpc('update_fine_tune_usage', {
+            p_user_id: userId,
+            p_avatar_id: avatarContext.id,
+            p_fine_tuned_model: avatarProfile.active_fine_tuned_model,
+            p_input_tokens: data.usage.prompt_tokens || 0,
+            p_output_tokens: data.usage.completion_tokens || 0
+          });
+        } catch (usageError) {
+          console.error('Failed to track fine-tune usage:', usageError);
+          // Don't throw - this is non-critical
+        }
+      }
 
       // Check if the model wants to call a function
       if (assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0) {

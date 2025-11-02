@@ -1,6 +1,14 @@
 import { supabase } from '@/integrations/supabase/client';
 import { apiKeyService } from './apiKeyService';
 
+export interface ConversationPair {
+  user_message: string;
+  assistant_message: string;
+  context?: string;
+  pattern_type?: string;
+  quality_score?: number;
+}
+
 export interface TrainingData {
   id?: string;
   user_id: string;
@@ -432,6 +440,13 @@ export class TrainingService {
       let extractedContent = '';
       let conversationAnalysis: any = {};
 
+      // First, check if there's directly pasted conversation text
+      // This could be in training_instructions field when user pastes conversation examples
+      if (trainingData.training_type === 'conversation_analysis' && trainingData.training_instructions) {
+        onProgress?.('Processing pasted conversation text...', 25);
+        extractedContent = trainingData.training_instructions;
+      }
+
       // Process uploaded files
       if (files.length > 0) {
         onProgress?.('Processing uploaded files...', 30);
@@ -468,11 +483,67 @@ export class TrainingService {
         }
       }
 
-      onProgress?.('Analyzing conversation patterns...', 50);
+      // Check if examples have already been extracted and cached (from analyzeConversationsOnly)
+      const { data: existingExamples } = await supabase
+        .from('avatar_training_examples')
+        .select('*')
+        .eq('training_data_id', trainingDataId)
+        .eq('user_id', userId);
 
-      // Analyze conversation patterns if we have extracted content
-      if (extractedContent.trim()) {
-        conversationAnalysis = await this.analyzeConversationPatterns(extractedContent, userId);
+      const hasExistingExamples = existingExamples && existingExamples.length > 0;
+
+      if (hasExistingExamples) {
+        // Examples already cached from Step 1 (analyzeConversationsOnly)
+        onProgress?.('Using pre-analyzed conversation examples...', 55);
+        console.log(`Found ${existingExamples.length} pre-analyzed examples, skipping analysis`);
+
+        // Try to get the analysis results from training data
+        if (trainingData.analysis_results) {
+          conversationAnalysis = trainingData.analysis_results;
+        }
+
+        // Build extracted content summary from cached examples (for prompt generation)
+        extractedContent = existingExamples.map((ex: any, idx: number) =>
+          `Example ${idx + 1}:\nUser: ${ex.user_message}\nAssistant: ${ex.assistant_message}\n`
+        ).join('\n');
+
+      } else {
+        // No cached examples, need to analyze now
+        onProgress?.('Analyzing conversation patterns...', 50);
+
+        // Analyze conversation patterns if we have extracted content
+        if (extractedContent.trim()) {
+          conversationAnalysis = await this.analyzeConversationPatterns(extractedContent, userId);
+        }
+
+        onProgress?.('Caching conversation examples...', 55);
+
+        // Get system prompt for caching examples (needed before caching)
+        const existingVersionsForPrompt = await this.getPromptVersions(avatarId, userId);
+        let systemPromptForCache: string;
+
+        if (existingVersionsForPrompt.length > 0) {
+          const activeVersion = existingVersionsForPrompt.find(v => v.is_active);
+          const versionToUse = activeVersion || existingVersionsForPrompt.reduce((latest, current) => {
+            return new Date(current.created_at!) > new Date(latest.created_at!) ? current : latest;
+          });
+          systemPromptForCache = versionToUse.system_prompt;
+        } else {
+          systemPromptForCache = await this.getAvatarSystemPrompt(avatarId, userId);
+        }
+
+        // Cache conversation examples to database for fine-tuning eligibility
+        let cachedExamplesCount = 0;
+        if (conversationAnalysis && Object.keys(conversationAnalysis).length > 0) {
+          cachedExamplesCount = await this.cacheConversationExamples(
+            conversationAnalysis,
+            avatarId,
+            userId,
+            trainingDataId,
+            systemPromptForCache
+          );
+          console.log(`Cached ${cachedExamplesCount} conversation examples for fine-tuning`);
+        }
       }
 
       onProgress?.('Getting current avatar prompt...', 60);
@@ -768,6 +839,351 @@ Return this exact JSON structure:
     } catch {
       return { raw_analysis: analysisText };
     }
+  }
+
+  // =============================================
+  // DIRECT CONVERSATION PARSING
+  // =============================================
+
+  /**
+   * Parse conversation pairs from text in "User: ... \n Assistant: ..." format
+   * This is a direct parser that doesn't rely on AI and is very fast
+   */
+  private static parseConversationPairs(text: string): ConversationPair[] {
+    const pairs: ConversationPair[] = [];
+
+    // Split by double newlines or single newlines to get conversation blocks
+    const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+    let currentUser = '';
+    let currentAssistant = '';
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+
+      // Check if this line starts with "User:" or "Assistant:"
+      if (line.startsWith('User:')) {
+        // Save previous pair if we have one
+        if (currentUser && currentAssistant) {
+          pairs.push({
+            user_message: currentUser.trim(),
+            assistant_message: currentAssistant.trim(),
+            pattern_type: 'statement',
+            quality_score: this.calculateQualityScore(currentUser, currentAssistant)
+          });
+          currentUser = '';
+          currentAssistant = '';
+        }
+
+        // Extract user message (everything after "User:")
+        currentUser = line.substring(5).trim();
+      } else if (line.startsWith('Assistant:')) {
+        // Extract assistant message (everything after "Assistant:")
+        currentAssistant = line.substring(10).trim();
+      } else if (currentUser && !currentAssistant) {
+        // Continuation of user message
+        currentUser += ' ' + line;
+      } else if (currentAssistant) {
+        // Continuation of assistant message
+        currentAssistant += ' ' + line;
+      }
+    }
+
+    // Don't forget the last pair
+    if (currentUser && currentAssistant) {
+      pairs.push({
+        user_message: currentUser.trim(),
+        assistant_message: currentAssistant.trim(),
+        pattern_type: 'statement',
+        quality_score: this.calculateQualityScore(currentUser, currentAssistant)
+      });
+    }
+
+    console.log(`Direct parser extracted ${pairs.length} conversation pairs`);
+    return pairs;
+  }
+
+  /**
+   * Calculate quality score for a conversation pair based on length and content
+   */
+  private static calculateQualityScore(userMsg: string, assistantMsg: string): number {
+    const userLen = userMsg.trim().length;
+    const assistantLen = assistantMsg.trim().length;
+
+    // Penalize very short exchanges
+    if (userLen < 5 || assistantLen < 5) return 0.3;
+
+    // Good quality if both messages have reasonable length
+    if (userLen >= 10 && assistantLen >= 15) return 0.85;
+    if (userLen >= 5 && assistantLen >= 10) return 0.7;
+
+    return 0.6;
+  }
+
+  /**
+   * Map pattern demonstrated to pattern type categories
+   */
+  private static mapPatternType(demonstrated: string): string {
+    const lower = demonstrated.toLowerCase();
+    if (lower.includes('greeting') || lower.includes('hello')) return 'greeting';
+    if (lower.includes('question')) return 'question';
+    if (lower.includes('joke') || lower.includes('humor')) return 'joke';
+    if (lower.includes('advice') || lower.includes('suggestion')) return 'advice';
+    if (lower.includes('story') || lower.includes('narrative')) return 'story';
+    if (lower.includes('explanation') || lower.includes('explain')) return 'explanation';
+    return 'statement';
+  }
+
+  // =============================================
+  // ANALYZE CONVERSATIONS WITHOUT TRAINING
+  // =============================================
+
+  /**
+   * Clear all existing training examples for an avatar
+   * This allows fresh training data without accumulation
+   */
+  static async clearTrainingExamples(avatarId: string, userId: string): Promise<number> {
+    const { data: deletedExamples, error } = await supabase
+      .from('avatar_training_examples')
+      .delete()
+      .eq('avatar_id', avatarId)
+      .eq('user_id', userId)
+      .select();
+
+    if (error) {
+      console.error('Error clearing training examples:', error);
+      throw new Error(`Failed to clear training examples: ${error.message}`);
+    }
+
+    const deletedCount = deletedExamples?.length || 0;
+    console.log(`Cleared ${deletedCount} existing training examples for avatar ${avatarId}`);
+    return deletedCount;
+  }
+
+  /**
+   * Analyze conversation text and cache examples WITHOUT creating a new prompt version
+   * This is used in Step 1 (Upload & Process) to prepare data before choosing training method
+   * NOTE: This clears all previous examples before processing new ones
+   */
+  static async analyzeConversationsOnly(
+    trainingDataId: string,
+    userId: string,
+    avatarId: string,
+    onProgress?: (step: string, percentage: number) => void
+  ): Promise<{
+    examplesCount: number;
+    analysis: any;
+  }> {
+    try {
+      // Get the training session
+      const trainingData = await this.getTrainingSession(trainingDataId);
+      if (!trainingData) throw new Error('Training session not found');
+
+      onProgress?.('Clearing previous training data...', 5);
+
+      // Clear all existing examples for this avatar before processing new ones
+      // This ensures each upload replaces previous data instead of accumulating
+      await this.clearTrainingExamples(avatarId, userId);
+
+      onProgress?.('Initializing analysis...', 10);
+
+      // Update status to processing
+      await this.updateTrainingData(trainingDataId, { status: 'processing' });
+
+      // Get uploaded files
+      const files = await this.getTrainingFiles(trainingDataId);
+
+      let extractedContent = '';
+
+      // Check if there's directly pasted conversation text
+      if (trainingData.training_type === 'conversation_analysis' && trainingData.training_instructions) {
+        onProgress?.('Reading pasted conversation text...', 20);
+        extractedContent = trainingData.training_instructions;
+      }
+
+      // Process uploaded files
+      if (files.length > 0) {
+        onProgress?.('Processing uploaded files...', 30);
+
+        for (const file of files) {
+          await this.updateFileProcessingStatus(file.id!, 'processing');
+
+          try {
+            if (file.content_type.startsWith('image/')) {
+              const extractedText = await this.extractTextFromImage(file, userId);
+              extractedContent += `\n--- From ${file.original_name} ---\n${extractedText}\n`;
+              await this.updateFileProcessingStatus(file.id!, 'completed', extractedText);
+            } else if (file.content_type === 'text/plain') {
+              const textContent = await this.readTextFile(file);
+              extractedContent += `\n--- From ${file.original_name} ---\n${textContent}\n`;
+              await this.updateFileProcessingStatus(file.id!, 'completed', textContent);
+            }
+          } catch (fileError) {
+            console.error(`Error processing file ${file.original_name}:`, fileError);
+            await this.updateFileProcessingStatus(file.id!, 'failed');
+          }
+        }
+      }
+
+      if (!extractedContent.trim()) {
+        throw new Error('No conversation content found to analyze');
+      }
+
+      onProgress?.('Parsing conversation examples...', 40);
+
+      // First, use direct parser to extract conversation pairs (fast and reliable)
+      const directPairs = this.parseConversationPairs(extractedContent);
+      console.log(`Direct parser found ${directPairs.length} conversation pairs`);
+
+      onProgress?.('Analyzing conversation patterns with AI...', 60);
+
+      // Then use AI to get deeper analysis (vocabulary, patterns, etc.)
+      let conversationAnalysis: any = {};
+      try {
+        conversationAnalysis = await this.analyzeConversationPatterns(extractedContent, userId);
+      } catch (error) {
+        console.error('AI analysis failed, using direct parser only:', error);
+        // If AI fails, we still have the direct pairs
+        conversationAnalysis = {
+          conversation_examples: directPairs.map(pair => ({
+            user_message: pair.user_message,
+            avatar_response: pair.assistant_message,
+            pattern_demonstrated: 'conversation'
+          }))
+        };
+      }
+
+      // Merge direct pairs with AI analysis (prefer direct parser count)
+      if (!conversationAnalysis.conversation_examples || conversationAnalysis.conversation_examples.length === 0) {
+        conversationAnalysis.conversation_examples = directPairs.map(pair => ({
+          user_message: pair.user_message,
+          avatar_response: pair.assistant_message,
+          pattern_demonstrated: 'conversation'
+        }));
+      }
+
+      onProgress?.('Caching conversation examples...', 80);
+
+      // Get system prompt for caching
+      const existingVersions = await this.getPromptVersions(avatarId, userId);
+      let systemPrompt: string;
+
+      if (existingVersions.length > 0) {
+        const activeVersion = existingVersions.find(v => v.is_active);
+        const versionToUse = activeVersion || existingVersions.reduce((latest, current) => {
+          return new Date(current.created_at!) > new Date(latest.created_at!) ? current : latest;
+        });
+        systemPrompt = versionToUse.system_prompt;
+      } else {
+        systemPrompt = await this.getAvatarSystemPrompt(avatarId, userId);
+      }
+
+      onProgress?.('Caching conversation examples...', 85);
+
+      // Cache conversation examples to database
+      let cachedExamplesCount = 0;
+      if (conversationAnalysis && Object.keys(conversationAnalysis).length > 0) {
+        cachedExamplesCount = await this.cacheConversationExamples(
+          conversationAnalysis,
+          avatarId,
+          userId,
+          trainingDataId,
+          systemPrompt
+        );
+      }
+
+      onProgress?.('Analysis complete!', 100);
+
+      // Update training data with analysis results (but don't mark as completed)
+      await this.updateTrainingData(trainingDataId, {
+        status: 'pending', // Keep as pending, training not done yet
+        analysis_results: conversationAnalysis
+      });
+
+      // Log completion of analysis
+      await this.logTrainingEvent({
+        avatar_id: avatarId,
+        user_id: userId,
+        training_data_id: trainingDataId,
+        log_type: 'processing_step',
+        message: `Analysis complete: extracted ${cachedExamplesCount} conversation examples`,
+        processing_step: 'analysis',
+        progress_percentage: 100
+      });
+
+      return {
+        examplesCount: cachedExamplesCount,
+        analysis: conversationAnalysis
+      };
+
+    } catch (error) {
+      // Update status to failed
+      await this.updateTrainingData(trainingDataId, { status: 'failed' });
+
+      // Log error
+      await this.logTrainingEvent({
+        avatar_id: avatarId,
+        user_id: userId,
+        training_data_id: trainingDataId,
+        log_type: 'error',
+        message: `Analysis failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        details: { error: error instanceof Error ? error.stack : error }
+      });
+
+      throw error;
+    }
+  }
+
+  // =============================================
+  // CACHE CONVERSATION EXAMPLES FOR FINE-TUNING
+  // =============================================
+
+  /**
+   * Save extracted conversation examples to the database for fine-tuning
+   * This makes them available for statistics, eligibility checking, and actual fine-tuning
+   */
+  private static async cacheConversationExamples(
+    conversationAnalysis: any,
+    avatarId: string,
+    userId: string,
+    trainingDataId: string,
+    systemPrompt: string
+  ): Promise<number> {
+    // Extract conversation examples from the analysis
+    const conversationExamples = conversationAnalysis?.conversation_examples || [];
+
+    if (conversationExamples.length === 0) {
+      console.log('No conversation examples found in analysis');
+      return 0;
+    }
+
+    // Prepare examples for database insertion (no deduplication needed since we cleared first)
+    const examplesData = conversationExamples.map((ex: any) => ({
+      user_id: userId,
+      avatar_id: avatarId,
+      training_data_id: trainingDataId,
+      system_prompt: systemPrompt,
+      user_message: ex.user_message,
+      assistant_message: ex.avatar_response,
+      source_type: 'uploaded_file' as const,
+      quality_score: this.calculateQualityScore(ex.user_message, ex.avatar_response),
+      pattern_type: this.mapPatternType(ex.pattern_demonstrated || ''),
+      used_in_training: false,
+      times_used: 0
+    }));
+
+    // Insert all examples into database
+    const { error } = await supabase
+      .from('avatar_training_examples')
+      .insert(examplesData);
+
+    if (error) {
+      console.error('Error caching conversation examples:', error);
+      throw new Error(`Failed to cache conversation examples: ${error.message}`);
+    }
+
+    console.log(`Successfully cached ${examplesData.length} conversation examples`);
+    return examplesData.length;
   }
 
   private static buildAnalysisSummary(conversationAnalysis: any, extractedContent: string): string {

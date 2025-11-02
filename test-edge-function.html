@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Chat Completions Edge Function</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .success {
+            color: green;
+        }
+        .error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>Edge Function CORS Test</h1>
+
+    <div class="section">
+        <h2>Test Configuration</h2>
+        <p><strong>Function URL:</strong> https://xatrtqdgghanwdujyhkq.supabase.co/functions/v1/chat-completions</p>
+        <p>This page will test if the edge function handles CORS correctly.</p>
+    </div>
+
+    <div class="section">
+        <h2>Step 1: Test OPTIONS (Preflight)</h2>
+        <button onclick="testOptions()">Test OPTIONS Request</button>
+        <div id="options-result"></div>
+    </div>
+
+    <div class="section">
+        <h2>Step 2: Test POST (Without Auth)</h2>
+        <button onclick="testPostNoAuth()">Test POST Without Auth</button>
+        <div id="post-noauth-result"></div>
+    </div>
+
+    <script>
+        const FUNCTION_URL = 'https://xatrtqdgghanwdujyhkq.supabase.co/functions/v1/chat-completions';
+
+        async function testOptions() {
+            const resultDiv = document.getElementById('options-result');
+            resultDiv.innerHTML = '<p>Testing OPTIONS request...</p>';
+
+            try {
+                const response = await fetch(FUNCTION_URL, {
+                    method: 'OPTIONS',
+                    headers: {
+                        'Origin': 'http://localhost:8080',
+                        'Access-Control-Request-Method': 'POST',
+                        'Access-Control-Request-Headers': 'authorization, content-type'
+                    }
+                });
+
+                const corsHeaders = {
+                    'access-control-allow-origin': response.headers.get('access-control-allow-origin'),
+                    'access-control-allow-headers': response.headers.get('access-control-allow-headers'),
+                    'access-control-allow-methods': response.headers.get('access-control-allow-methods')
+                };
+
+                resultDiv.innerHTML = `
+                    <p class="success">✓ OPTIONS request successful!</p>
+                    <p><strong>Status:</strong> ${response.status}</p>
+                    <p><strong>CORS Headers:</strong></p>
+                    <pre>${JSON.stringify(corsHeaders, null, 2)}</pre>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <p class="error">✗ OPTIONS request failed</p>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                `;
+            }
+        }
+
+        async function testPostNoAuth() {
+            const resultDiv = document.getElementById('post-noauth-result');
+            resultDiv.innerHTML = '<p>Testing POST request without auth...</p>';
+
+            try {
+                const response = await fetch(FUNCTION_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-4o-mini',
+                        messages: [{ role: 'user', content: 'Hello' }]
+                    })
+                });
+
+                const data = await response.json();
+
+                resultDiv.innerHTML = `
+                    <p class="${response.ok ? 'error' : 'success'}">Expected 401 Unauthorized</p>
+                    <p><strong>Status:</strong> ${response.status}</p>
+                    <p><strong>Response:</strong></p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                    ${response.status === 401 ? '<p class="success">✓ Function is working! Returns 401 as expected.</p>' : ''}
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <p class="error">✗ POST request failed</p>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                `;
+            }
+        }
+    </script>
+</body>
+</html>

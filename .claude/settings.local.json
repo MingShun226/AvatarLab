@@ -15,7 +15,12 @@
       "Bash(winget:*)",
       "Bash(powershell:*)",
       "WebSearch",
-      "WebFetch(domain:ai.google.dev)"
+      "WebFetch(domain:ai.google.dev)",
+      "mcp__ide__getDiagnostics",
+      "Bash(git log:*)",
+      "WebFetch(domain:help.elevenlabs.io)",
+      "WebFetch(domain:elevenlabs.io)",
+      "Bash(supabase:*)"
     ],
     "deny": [],
     "ask": []

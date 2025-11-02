@@ -7,13 +7,12 @@ import {
   AlertCircle,
   Brain,
   BookOpen,
-  TestTube,
   History,
   Sparkles
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { SimpleAvatarSelector } from '@/components/chatbot-training/SimpleAvatarSelector';
-import { DatabaseTrainingInterface } from '@/components/chatbot-training/DatabaseTrainingInterface';
+import { SimplifiedTrainingInterface } from './SimplifiedTrainingInterface';
 import { TestChatSimple } from '@/components/chatbot-training/TestChatSimple';
 import { KnowledgeBase } from '@/components/chatbot-training/KnowledgeBase';
 import { DatabaseVersionControl } from '@/components/chatbot-training/DatabaseVersionControl';
@@ -210,13 +209,14 @@ const ChatbotSectionClean = () => {
           </TabsList>
 
           <TabsContent value="train">
-            <DatabaseTrainingInterface
-              avatarName={selectedAvatar.name}
-              avatarId={selectedAvatar.id}
-              isTraining={isTraining}
-              onTrainingStart={handleTrainingStart}
-              onTrainingComplete={handleTrainingComplete}
-            />
+            {user && (
+              <SimplifiedTrainingInterface
+                avatarId={selectedAvatar.id}
+                avatarName={selectedAvatar.name}
+                userId={user.id}
+                onTrainingComplete={handleTrainingComplete}
+              />
+            )}
           </TabsContent>
 
           <TabsContent value="memories">
