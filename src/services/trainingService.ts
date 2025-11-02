@@ -467,9 +467,16 @@ Action: Find backstory section → Rewrite to teacher story → Keep personality
 User Request: "Update personality to be more friendly"
 Action: Find personality section → Modify to be friendly → Keep backstory, age, etc.
 
+FORMATTING REQUIREMENTS:
+- Maintain proper line breaks and spacing
+- Use \\n for new lines in JSON
+- Keep paragraph separation clear
+- Preserve the structure of the original prompt
+- Don't squeeze everything together
+
 Return ONLY valid JSON:
 {
-  "modified_prompt": "The prompt with ONLY the requested sections changed",
+  "modified_prompt": "The prompt with ONLY the requested sections changed. Use \\n for line breaks to maintain readability.",
   "sections_modified": ["list of specific sections you changed"],
   "sections_preserved": ["list of sections kept unchanged"],
   "change_summary": "brief description of what was changed"
@@ -486,12 +493,13 @@ Return ONLY valid JSON:
         messages: [
           {
             role: 'system',
-            content: 'You are a surgical prompt editor. You make MINIMAL, TARGETED changes to only the sections requested. You preserve everything else 100%. You do NOT add training sections or examples unless explicitly asked.'
+            content: 'You are a surgical prompt editor. You make MINIMAL, TARGETED changes to only the sections requested. You preserve everything else 100%. You do NOT add training sections or examples unless explicitly asked. IMPORTANT: Maintain proper formatting with line breaks (\\n) and spacing to keep the prompt readable and well-structured.'
           },
           { role: 'user', content: prompt }
         ],
         max_tokens: 8000,
-        temperature: 0.1
+        temperature: 0.1,
+        response_format: { type: "json_object" }
       })
     });
 
@@ -1540,6 +1548,7 @@ CRITICAL RULES:
 4. **PRESERVE WHAT'S NOT MENTIONED** - Keep unrelated parts unchanged
 5. **BE INTELLIGENT** - If user says "change backstory to X", actually change it, don't just add a note
 6. **CONFLICT RESOLUTION** - If new training contradicts old, the new one WINS
+7. **FORMATTING** - Maintain proper line breaks (\\n) and spacing for readability
 
 Return ONLY valid JSON:
 {
@@ -1596,12 +1605,13 @@ Output: REWRITE personality to be outgoing, REWRITE job/backstory, ADD training 
         messages: [
           {
             role: 'system',
-            content: 'You are an expert AI prompt engineer specializing in intelligent prompt refinement. You can detect user intent to either REWRITE core sections (backstory, personality, identity) or ENHANCE behavior (conversation style). You analyze what the user wants and apply the appropriate strategy - not just blindly appending content.'
+            content: 'You are an expert AI prompt engineer specializing in intelligent prompt refinement. You can detect user intent to either REWRITE core sections (backstory, personality, identity) or ENHANCE behavior (conversation style). You analyze what the user wants and apply the appropriate strategy - not just blindly appending content. Always maintain proper formatting with line breaks (\\n) for readability.'
           },
           { role: 'user', content: prompt }
         ],
         max_tokens: 12000,
-        temperature: 0.2
+        temperature: 0.2,
+        response_format: { type: "json_object" }
       })
     });
 
