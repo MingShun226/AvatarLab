@@ -2,12 +2,15 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSidebar } from '@/contexts/SidebarContext';
+import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   LayoutDashboard,
   MessageCircle,
   Mic,
   Image,
+  Video,
   User,
   GitBranch,
   Settings,
@@ -18,7 +21,9 @@ import {
   X,
   UserCircle,
   CreditCard,
-  Key
+  Key,
+  ShieldCheck,
+  ArrowRightLeft
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -33,6 +38,7 @@ const navigationItems = [
   { id: 'chatbot', label: 'AI Chatbot', icon: MessageCircle, path: '/chatbot-studio' },
   { id: 'tts', label: 'TTS Voice', icon: Mic, path: '/tts-studio' },
   { id: 'images', label: 'AI Images', icon: Image, path: '/images-studio' },
+  { id: 'videos', label: 'AI Videos', icon: Video, path: '/video-studio' },
   { id: 'avatar', label: 'AI Avatar', icon: User, path: '/avatar-studio' },
   { id: 'learning-path', label: 'Learning Path', icon: GitBranch, path: '/learning-path' },
   { id: 'my-avatar', label: 'My Avatar', icon: UserCircle, path: '/my-avatars' },
@@ -43,6 +49,7 @@ const navigationItems = [
 const Sidebar = ({ activeSection, onSectionChange, onLogout }: SidebarProps) => {
   const { isCollapsed, setIsCollapsed } = useSidebar();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const { isAdmin } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -199,16 +206,52 @@ const Sidebar = ({ activeSection, onSectionChange, onLogout }: SidebarProps) => 
           >
             <Settings className="w-4 h-4 flex-shrink-0" />
             {!isCollapsed && <span className="truncate">Settings</span>}
-            
+
             {/* Tooltip for collapsed state */}
             {isCollapsed && (
-              <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded 
-                            opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none 
+              <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded
+                            opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none
                             whitespace-nowrap z-50 hidden md:block">
                 Settings
               </div>
             )}
           </button>
+
+          {/* Admin Panel Switch */}
+          {isAdmin && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate('/admin');
+                setIsMobileOpen(false);
+              }}
+              className={`
+                nav-item w-full text-sm relative group
+                ${location.pathname.startsWith('/admin') ? 'nav-item-active' : ''}
+                ${isCollapsed ? 'justify-center px-2' : ''}
+              `}
+              title={isCollapsed ? 'Admin Panel' : undefined}
+            >
+              <ShieldCheck className="w-4 h-4 flex-shrink-0" />
+              {!isCollapsed && (
+                <div className="flex items-center justify-between flex-1">
+                  <span className="truncate">Admin Panel</span>
+                  <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                    <ArrowRightLeft className="h-2 w-2" />
+                  </Badge>
+                </div>
+              )}
+
+              {/* Tooltip for collapsed state */}
+              {isCollapsed && (
+                <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded
+                              opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none
+                              whitespace-nowrap z-50 hidden md:block">
+                  Switch to Admin Panel
+                </div>
+              )}
+            </button>
+          )}
           
           <Button
             variant="ghost"
