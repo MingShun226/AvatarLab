@@ -84,12 +84,17 @@ export const useAuth = () => {
       setSession(null);
       setUser(null);
 
+      // Reload the page to trigger redirect to /auth
+      window.location.href = '/auth';
+
       return { error: null };
     } catch (err) {
       console.warn('Logout exception:', err);
       // Clear state even on exception
       setSession(null);
       setUser(null);
+      // Still redirect on error
+      window.location.href = '/auth';
       return { error: null };
     }
   };
