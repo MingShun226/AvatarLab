@@ -54,13 +54,33 @@ export const useAuth = () => {
       email,
       password
     });
-    
+
+    // Update last_login timestamp after successful login
+    if (data?.user && !error) {
+      await supabase
+        .from('profiles')
+        .update({ last_login: new Date().toISOString() })
+        .eq('id', data.user.id);
+    }
+
     return { data, error };
   };
 
   const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    return { error };
+    try {
+      // Use local scope to avoid 403 errors with expired sessions
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+
+      // Even if there's an error, clear local state
+      if (error) {
+        console.warn('Logout error (clearing local state anyway):', error.message);
+      }
+
+      return { error: null }; // Always return success to clear UI state
+    } catch (err) {
+      console.warn('Logout exception (clearing local state anyway):', err);
+      return { error: null }; // Always return success to clear UI state
+    }
   };
 
   const resetPassword = async (email: string) => {
