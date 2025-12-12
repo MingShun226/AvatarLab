@@ -68,17 +68,28 @@ export const useAuth = () => {
 
   const signOut = async () => {
     try {
-      // Use local scope to avoid 403 errors with expired sessions
-      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      // Check if there's an active session
+      const { data: { session } } = await supabase.auth.getSession();
 
-      // Even if there's an error, clear local state
-      if (error) {
-        console.warn('Logout error (clearing local state anyway):', error.message);
+      if (session) {
+        // Use local scope to avoid 403 errors with expired sessions
+        const { error } = await supabase.auth.signOut({ scope: 'local' });
+
+        if (error && error.message !== 'Auth session missing!') {
+          console.warn('Logout error:', error.message);
+        }
       }
+
+      // Clear local state regardless of session status
+      setSession(null);
+      setUser(null);
 
       return { error: null }; // Always return success to clear UI state
     } catch (err) {
       console.warn('Logout exception (clearing local state anyway):', err);
+      // Clear local state even on exception
+      setSession(null);
+      setUser(null);
       return { error: null }; // Always return success to clear UI state
     }
   };
