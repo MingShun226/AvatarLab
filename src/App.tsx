@@ -12,6 +12,7 @@ import TTSStudio from '@/pages/TTSStudio';
 import MyAvatars from '@/pages/MyAvatars';
 import ChatbotStudio from '@/pages/ChatbotStudio';
 import ImagesStudio from '@/pages/ImagesStudio';
+import VideoStudio from '@/pages/VideoStudio';
 import AvatarStudio from '@/pages/AvatarStudio';
 import LearningPath from '@/pages/LearningPath';
 import Billing from '@/pages/Billing';
@@ -20,6 +21,15 @@ import { Toaster } from "@/components/ui/toaster"
 import { Toaster as SonnerToaster } from "@/components/ui/sonner"
 import CreateAvatar from '@/pages/CreateAvatar';
 import APIKeys from '@/pages/APIKeys';
+
+// Admin imports
+import { AdminRoute } from '@/components/admin/AdminRoute';
+import { AdminLayout } from '@/components/admin/AdminLayout';
+import { AdminDashboard } from '@/pages/admin/AdminDashboard';
+import { UsersManagement } from '@/pages/admin/UsersManagement';
+import { TiersManagementNew } from '@/pages/admin/TiersManagementNew';
+import { UserDetails } from '@/pages/admin/UserDetails';
+import { AdminSettings } from '@/pages/admin/AdminSettings';
 
 import { useAuth } from '@/hooks/useAuth';
 import { SidebarProvider } from '@/contexts/SidebarContext';
@@ -111,6 +121,10 @@ function App() {
             element={user ? <ImagesStudio /> : <Navigate to="/auth" />}
           />
           <Route
+            path="/video-studio"
+            element={user ? <VideoStudio /> : <Navigate to="/auth" />}
+          />
+          <Route
             path="/avatar-studio"
             element={user ? <AvatarStudio /> : <Navigate to="/auth" />}
           />
@@ -130,6 +144,23 @@ function App() {
             path="/api-keys"
             element={user ? <APIKeys /> : <Navigate to="/auth" />}
           />
+
+          {/* Admin Routes */}
+          <Route
+            path="/admin"
+            element={
+              <AdminRoute>
+                <AdminLayout />
+              </AdminRoute>
+            }
+          >
+            <Route index element={<AdminDashboard />} />
+            <Route path="users" element={<UsersManagement />} />
+            <Route path="users/:userId" element={<UserDetails />} />
+            <Route path="tiers" element={<TiersManagementNew />} />
+            <Route path="settings" element={<AdminSettings />} />
+          </Route>
+
           <Route path="*" element={<NotFound />} />
         </Routes>
         <Toaster />

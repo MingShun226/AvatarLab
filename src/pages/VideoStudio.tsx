@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '@/components/dashboard/Sidebar';
-import BillingSectionNew from '@/components/dashboard/sections/BillingSectionNew';
+import VideosSection from '@/components/dashboard/sections/VideosSection';
 import { useAuth } from '@/hooks/useAuth';
 import { useSidebar } from '@/contexts/SidebarContext';
 
-const Billing = () => {
-  const [activeSection, setActiveSection] = useState('billing');
+const VideoStudio = () => {
+  const [activeSection, setActiveSection] = useState('videos');
   const { signOut } = useAuth();
   const { isCollapsed } = useSidebar();
   const navigate = useNavigate();
@@ -38,7 +38,7 @@ const Billing = () => {
       <main className={`${isCollapsed ? 'ml-16' : 'ml-56'} overflow-auto transition-all duration-300`}>
         <div className="p-6">
           <div className="max-w-6xl mx-auto">
-            <BillingSectionNew />
+            <VideosSection />
           </div>
         </div>
       </main>
@@ -46,4 +46,4 @@ const Billing = () => {
   );
 };
 
-export default Billing;
+export default VideoStudio;

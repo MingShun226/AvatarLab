@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '@/components/dashboard/Sidebar';
-import AvatarSection from '@/components/dashboard/sections/AvatarSection';
+import AvatarVideoSection from '@/components/dashboard/sections/AvatarVideoSection';
 import { useAuth } from '@/hooks/useAuth';
 import { useSidebar } from '@/contexts/SidebarContext';
 
@@ -38,7 +38,7 @@ const AvatarStudio = () => {
       <main className={`${isCollapsed ? 'ml-16' : 'ml-56'} overflow-auto transition-all duration-300`}>
         <div className="p-6">
           <div className="max-w-6xl mx-auto">
-            <AvatarSection />
+            <AvatarVideoSection />
           </div>
         </div>
       </main>

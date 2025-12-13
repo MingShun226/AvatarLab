@@ -84,6 +84,7 @@ async function getApiKey(
       return atob(userKey.api_key_encrypted);
     } catch (e) {
       console.error('Failed to decrypt user API key:', e);
+      throw new Error(`Failed to decrypt ${provider} API key. Please re-add your API key in Settings > API Management.`);
     }
   }
 
@@ -93,7 +94,19 @@ async function getApiKey(
     return platformKey;
   }
 
-  throw new Error(`No API key configured for ${provider}. Please add your API key in Settings > API Management.`);
+  // Provider-specific error messages
+  const providerNames: Record<string, string> = {
+    'openai': 'OpenAI',
+    'stability': 'Stability AI',
+    'google': 'Google AI (Gemini)',
+    'kie-ai': 'KIE.AI'
+  };
+
+  const providerName = providerNames[provider] || provider;
+  const errorMessage = `No ${providerName} API key configured. Please add your API key in Settings > API Management to use this service.`;
+
+  console.error(errorMessage);
+  throw new Error(errorMessage);
 }
 
 // Provider adapters
@@ -171,44 +184,224 @@ async function generateWithStability(prompt: string, parameters: any, apiKey: st
   };
 }
 
-async function generateWithKieAI(prompt: string, parameters: any, apiKey: string) {
-  console.log('Generating with KIE AI:', { prompt, parameters });
+// Helper: Convert width/height to aspect ratio
+function getAspectRatioFromSize(width: number, height: number): string {
+  const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+  const divisor = gcd(width, height);
+  const w = width / divisor;
+  const h = height / divisor;
 
-  const response = await fetch('https://api.kie.ai/api/v1/flux/kontext/generate', {
+  // Map to common aspect ratios
+  const ratio = `${w}:${h}`;
+
+  // Normalize to standard ratios
+  const standardRatios: Record<string, string> = {
+    '1:1': '1:1',
+    '4:3': '4:3',
+    '3:4': '3:4',
+    '16:9': '16:9',
+    '9:16': '9:16',
+    '3:2': '3:2',
+    '2:3': '2:3',
+    '5:4': '5:4',
+    '4:5': '4:5',
+    '21:9': '21:9',
+  };
+
+  return standardRatios[ratio] || '1:1';
+}
+
+// Helper: Convert width/height to Qwen size format
+function getQwenSize(width: number, height: number): string {
+  // Qwen uses specific named sizes
+  if (width === 1024 && height === 1024) return 'square_hd';
+  if (width === 512 && height === 512) return 'square';
+  if (width === 1024 && height === 768) return 'landscape_4_3';
+  if (width === 1024 && height === 576) return 'landscape_16_9';
+  if (width === 768 && height === 1024) return 'portrait_4_3';
+  if (width === 576 && height === 1024) return 'portrait_16_9';
+
+  // Fallback based on aspect ratio
+  const ratio = width / height;
+  if (ratio === 1) return 'square_hd';
+  if (ratio > 1.5) return 'landscape_16_9';
+  if (ratio > 1) return 'landscape_4_3';
+  if (ratio < 0.7) return 'portrait_16_9';
+  return 'portrait_4_3';
+}
+
+// KIE.AI Unified Jobs API
+// All KIE models use the same endpoint with different model identifiers
+async function generateWithKieUnified(
+  modelId: string,
+  modelName: string,
+  prompt: string,
+  parameters: any,
+  apiKey: string,
+  inputImage?: string
+) {
+  console.log(`Generating with KIE.AI ${modelName}:`, { modelId, prompt, parameters, hasInputImage: !!inputImage });
+
+  // Build input object based on model type
+  const input: any = {
+    prompt,
+  };
+
+  // Get size from parameters
+  const width = parameters.width || 1024;
+  const height = parameters.height || 1024;
+  const aspectRatio = getAspectRatioFromSize(width, height);
+
+  console.log(`Size parameters: width=${width}, height=${height}, aspectRatio=${aspectRatio}`);
+
+  // Model-specific parameters
+  if (modelId === 'google/nano-banana') {
+    input.output_format = parameters.output_format || 'png';
+    input.image_size = aspectRatio;
+    console.log(`Nano Banana: image_size=${aspectRatio}`);
+  } else if (modelId === 'google/nano-banana-edit') {
+    // Nano Banana Edit - image-to-image editing
+    if (!inputImage) {
+      throw new Error('Nano Banana Edit requires an input image');
+    }
+
+    // Log input image format for debugging
+    const imageType = inputImage.startsWith('data:') ? 'base64 data URL' :
+                      inputImage.startsWith('http') ? 'HTTP URL' : 'unknown format';
+    const imageLength = inputImage.length;
+    console.log(`Nano Banana Edit input image: type=${imageType}, length=${imageLength}`);
+
+    // Nano Banana Edit expects image_urls as an array
+    input.image_urls = [inputImage];
+    input.image_size = aspectRatio;
+    input.output_format = parameters.output_format || 'png';
+    console.log(`Nano Banana Edit: image_size=${aspectRatio}`);
+  } else if (modelId === 'qwen/text-to-image') {
+    input.image_size = getQwenSize(width, height);
+    input.num_inference_steps = parameters.steps || 30;
+    input.guidance_scale = parameters.guidance_scale || 2.5;
+    input.output_format = parameters.output_format || 'png';
+    if (parameters.negative_prompt) {
+      input.negative_prompt = parameters.negative_prompt;
+    }
+    console.log(`Qwen Text-to-Image: image_size=${input.image_size}`);
+  } else if (modelId === 'qwen/image-to-image') {
+    if (!inputImage) {
+      throw new Error('Image-to-image requires an input image');
+    }
+    // For Qwen img2img, use image_urls as array (KIE.AI standard for img2img)
+    input.image_urls = [inputImage];
+    input.image_size = getQwenSize(width, height);
+    input.strength = parameters.strength || 0.8;
+    input.num_inference_steps = parameters.steps || 30;
+    input.guidance_scale = parameters.guidance_scale || 2.5;
+    input.output_format = parameters.output_format || 'png';
+    if (parameters.negative_prompt) {
+      input.negative_prompt = parameters.negative_prompt;
+    }
+    console.log(`Qwen Image-to-Image: image_size=${input.image_size}, strength=${input.strength}`);
+  } else if (modelId === 'bytedance/seedream-v4-edit') {
+    // Seedream V4 Edit - instruction-based image editing
+    if (!inputImage) {
+      throw new Error('Seedream V4 Edit requires an input image');
+    }
+    // Try image_urls as array first, fallback to image_url if needed
+    input.image_urls = [inputImage];
+    input.aspect_ratio = aspectRatio;
+    input.output_format = parameters.output_format || 'png';
+    console.log(`Seedream V4 Edit: aspect_ratio=${aspectRatio}`);
+  } else if (modelId === 'recraft/remove-background') {
+    // Recraft Remove Background - automatic background removal
+    if (!inputImage) {
+      throw new Error('Recraft Remove Background requires an input image');
+    }
+    // Try image_urls as array first, fallback to image_url if needed
+    input.image_urls = [inputImage];
+    input.output_format = parameters.output_format || 'png';
+    console.log(`Recraft Remove Background: removing background from image`);
+  } else if (modelId.startsWith('google/imagen4')) {
+    // Imagen 4 family: imagen4-ultra, imagen4, imagen4-fast, imagen4-edit
+    if (modelId === 'google/imagen4-edit') {
+      // Imagen 4 Edit - image-to-image editing
+      if (!inputImage) {
+        throw new Error('Imagen 4 Edit requires an input image');
+      }
+      // Try image_urls as array first, fallback to image_url if needed
+      input.image_urls = [inputImage];
+    }
+    input.aspect_ratio = aspectRatio;
+    if (parameters.negative_prompt) {
+      input.negative_prompt = parameters.negative_prompt;
+    }
+    if (parameters.seed) {
+      input.seed = parameters.seed;
+    }
+    console.log(`Imagen 4: aspect_ratio=${aspectRatio}`);
+  } else if (modelId === 'grok-imagine/text-to-image') {
+    input.aspect_ratio = aspectRatio;
+    input.mode = parameters.mode || 'standard'; // standard, fun, spicy
+    console.log(`Grok Imagine: aspect_ratio=${aspectRatio}`);
+  } else if (modelId === 'gpt4o/image') {
+    // GPT-4O Image - note: may need specific size format
+    input.num_outputs = parameters.num_outputs || 1; // 1, 2, or 4
+    if (parameters.negative_prompt) {
+      input.negative_prompt = parameters.negative_prompt;
+    }
+    console.log(`GPT-4O: num_outputs=${input.num_outputs}`);
+  }
+
+  const requestBody = {
+    model: modelId,
+    input,
+  };
+
+  console.log('KIE.AI request body:', JSON.stringify(requestBody, null, 2));
+
+  const response = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      prompt,
-      aspectRatio: '1:1',
-      model: 'flux-kontext-pro',
-    }),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('KIE AI API error:', response.status, errorText);
-    throw new Error(`KIE AI API error: ${errorText}`);
+    console.error(`KIE.AI ${modelName} error:`, response.status, errorText);
+    throw new Error(`KIE.AI ${modelName} error: ${errorText}`);
   }
 
   const result = await response.json();
-  console.log('KIE AI response:', result);
+  console.log(`KIE.AI ${modelName} response:`, JSON.stringify(result, null, 2));
 
-  if (result.code !== 200 || !result.data?.taskId) {
-    throw new Error('Invalid response from KIE AI API');
+  // Check for API errors in response
+  if (!result || typeof result !== 'object') {
+    console.error('Invalid KIE.AI response - not an object:', result);
+    throw new Error(`Invalid response from KIE.AI ${modelName}: Response is not a valid JSON object`);
+  }
+
+  if (result.code !== 200) {
+    console.error(`KIE.AI ${modelName} returned error code:`, result.code);
+    console.error('Full error response:', JSON.stringify(result, null, 2));
+    const errorMsg = result.msg || result.message || result.error || 'Unknown error';
+    throw new Error(`KIE.AI ${modelName} error (${result.code}): ${errorMsg}`);
+  }
+
+  if (!result.data?.taskId) {
+    console.error('KIE.AI response missing taskId:', JSON.stringify(result, null, 2));
+    throw new Error(`Invalid response from KIE.AI ${modelName}: Missing taskId in response data`);
   }
 
   return {
     taskId: result.data.taskId,
-    model: 'flux-kontext-pro',
+    model: modelId,
     status: 'processing',
   };
 }
 
 async function generateWithGemini(prompt: string, parameters: any, apiKey: string, inputImage?: string, inputImages?: string[]) {
-  console.log('Generating with Google Gemini (Nano Banana):', {
+  console.log('Generating with Google Gemini:', {
     prompt,
     hasImage: !!inputImage,
     numImages: inputImages?.length || 0
@@ -341,14 +534,21 @@ async function generateWithGemini(prompt: string, parameters: any, apiKey: strin
   };
 }
 
-async function checkKieAIProgress(taskId: string, apiKey: string) {
-  const response = await fetch(`https://api.kie.ai/api/v1/flux/kontext/${taskId}`, {
+async function checkKieAIProgress(taskId: string, apiKey: string, provider: string) {
+  // All KIE models use the same unified status endpoint
+  const endpoint = `/api/v1/jobs/recordInfo?taskId=${taskId}`;
+
+  console.log(`Checking KIE.AI progress for ${provider} at ${endpoint}`);
+
+  const response = await fetch(`https://api.kie.ai${endpoint}`, {
     headers: {
       'Authorization': `Bearer ${apiKey}`,
     },
   });
 
   if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`Progress check failed for ${provider}:`, response.status, errorText);
     return {
       status: 'processing',
       progress: 50,
@@ -356,23 +556,57 @@ async function checkKieAIProgress(taskId: string, apiKey: string) {
   }
 
   const result = await response.json();
+  console.log(`Progress result for ${provider}:`, JSON.stringify(result, null, 2));
 
-  if (result.code === 200 && result.data?.status === 'completed') {
-    return {
-      status: 'completed',
-      progress: 100,
-      imageUrl: result.data.images?.[0],
-    };
+  // KIE.AI unified jobs API uses state: "waiting", "success", "fail"
+  if (result.code === 200 && result.data) {
+    const state = result.data.state;
+
+    if (state === 'success' && result.data.resultJson) {
+      // Parse the resultJson to get image URLs
+      try {
+        const resultData = typeof result.data.resultJson === 'string'
+          ? JSON.parse(result.data.resultJson)
+          : result.data.resultJson;
+
+        const imageUrl = resultData.resultUrls?.[0];
+
+        if (imageUrl) {
+          return {
+            status: 'completed',
+            progress: 100,
+            imageUrl,
+          };
+        }
+      } catch (e) {
+        console.error('Failed to parse resultJson:', e);
+      }
+    } else if (state === 'fail') {
+      return {
+        status: 'failed',
+        progress: 0,
+        error: result.data.failMsg || result.data.failCode || 'Generation failed',
+      };
+    } else {
+      // waiting state
+      return {
+        status: 'processing',
+        progress: 50,
+      };
+    }
   }
 
   return {
     status: 'processing',
-    progress: result.data?.progress || 50,
+    progress: 50,
   };
 }
 
 serve(async (req) => {
-  console.log('generate-image-unified function called:', req.method, req.url);
+  console.log('=== EDGE FUNCTION CALLED ===');
+  console.log('Method:', req.method);
+  console.log('URL:', req.url);
+  console.log('Headers:', Object.fromEntries(req.headers.entries()));
 
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -380,14 +614,15 @@ serve(async (req) => {
 
   try {
     const requestBody = await req.json();
-    console.log('Request body received:', {
+    console.log('Request body received:', JSON.stringify({
       provider: requestBody.provider,
       hasPrompt: !!requestBody.prompt,
       hasInputImage: !!requestBody.inputImage,
       hasInputImages: !!requestBody.inputImages,
       numInputImages: requestBody.inputImages?.length || 0,
-      checkProgress: requestBody.checkProgress
-    });
+      checkProgress: requestBody.checkProgress,
+      taskId: requestBody.taskId,
+    }, null, 2));
 
     const { prompt, provider = 'openai', parameters = {}, checkProgress = false, taskId, inputImage, inputImages } = requestBody;
 
@@ -422,9 +657,10 @@ serve(async (req) => {
 
     // Handle progress check for async providers
     if (checkProgress && taskId) {
-      console.log('Checking progress for task:', taskId);
+      console.log('Checking progress for task:', taskId, 'provider:', provider);
 
-      if (provider === 'kie-ai') {
+      // Check if it's a KIE.AI service (all start with 'kie-')
+      if (provider.startsWith('kie-')) {
         const kieApiKey = await getApiKey(
           supabase,
           user.id,
@@ -432,7 +668,7 @@ serve(async (req) => {
           Deno.env.get('KIE_AI_API_KEY')
         );
 
-        const progress = await checkKieAIProgress(taskId, kieApiKey);
+        const progress = await checkKieAIProgress(taskId, kieApiKey, provider);
 
         return new Response(
           JSON.stringify(progress),
@@ -458,55 +694,186 @@ serve(async (req) => {
 
     let result;
 
-    // Route to appropriate provider
+    // Route to appropriate provider (KIE.AI unified jobs API only)
+    const kieKey = await getApiKey(
+      supabase,
+      user.id,
+      'kie-ai',
+      Deno.env.get('KIE_AI_API_KEY')
+    );
+
+    // For img2img with KIE.AI, we need to upload input images to storage first
+    // KIE.AI doesn't accept base64 data URLs, only HTTP URLs
+    let processedInputImage: string | undefined = undefined;
+
+    if (inputImages && inputImages.length > 0) {
+      const firstImage = inputImages[0];
+
+      // If it's a base64 image, upload to storage first
+      if (firstImage.startsWith('data:image')) {
+        console.log('Uploading input image to storage for KIE.AI...');
+        const inputImageId = `input_${crypto.randomUUID()}`;
+        processedInputImage = await uploadToStorage(supabase, user.id, firstImage, inputImageId);
+        console.log('Input image uploaded:', processedInputImage);
+      } else if (firstImage.startsWith('http')) {
+        // Already a URL, use it directly
+        processedInputImage = firstImage;
+        console.log('Using existing HTTP URL for input image:', processedInputImage);
+      }
+    } else if (inputImage) {
+      // Legacy single image support
+      if (inputImage.startsWith('data:image')) {
+        console.log('Uploading input image to storage for KIE.AI...');
+        const inputImageId = `input_${crypto.randomUUID()}`;
+        processedInputImage = await uploadToStorage(supabase, user.id, inputImage, inputImageId);
+        console.log('Input image uploaded:', processedInputImage);
+      } else if (inputImage.startsWith('http')) {
+        processedInputImage = inputImage;
+        console.log('Using existing HTTP URL for input image:', processedInputImage);
+      }
+    }
+
     switch (provider) {
-      case 'openai': {
-        const openaiKey = await getApiKey(
-          supabase,
-          user.id,
-          'openai',
-          Deno.env.get('OPENAI_API_KEY')
+      case 'kie-nano-banana': {
+        result = await generateWithKieUnified(
+          'google/nano-banana',
+          'Nano Banana',
+          prompt,
+          parameters,
+          kieKey
         );
-        result = await generateWithOpenAI(prompt, parameters, openaiKey);
         break;
       }
 
-      case 'stability': {
-        const stabilityKey = await getApiKey(
-          supabase,
-          user.id,
-          'stability',
-          Deno.env.get('STABILITY_API_KEY')
+      case 'kie-qwen-text2img': {
+        result = await generateWithKieUnified(
+          'qwen/text-to-image',
+          'Qwen Text-to-Image',
+          prompt,
+          parameters,
+          kieKey
         );
-        result = await generateWithStability(prompt, parameters, stabilityKey);
         break;
       }
 
-      case 'kie-ai': {
-        const kieKey = await getApiKey(
-          supabase,
-          user.id,
-          'kie-ai',
-          Deno.env.get('KIE_AI_API_KEY')
+      case 'kie-imagen4-ultra': {
+        result = await generateWithKieUnified(
+          'google/imagen4-ultra',
+          'Imagen 4 Ultra',
+          prompt,
+          parameters,
+          kieKey
         );
-        result = await generateWithKieAI(prompt, parameters, kieKey);
         break;
       }
 
-      case 'google': {
-        const googleKey = await getApiKey(
-          supabase,
-          user.id,
-          'google',
-          Deno.env.get('GOOGLE_AI_API_KEY')
+      case 'kie-imagen4': {
+        result = await generateWithKieUnified(
+          'google/imagen4',
+          'Imagen 4 Standard',
+          prompt,
+          parameters,
+          kieKey
         );
-        result = await generateWithGemini(prompt, parameters, googleKey, inputImage, inputImages);
+        break;
+      }
+
+      case 'kie-imagen4-fast': {
+        result = await generateWithKieUnified(
+          'google/imagen4-fast',
+          'Imagen 4 Fast',
+          prompt,
+          parameters,
+          kieKey
+        );
+        break;
+      }
+
+      case 'kie-grok-imagine': {
+        result = await generateWithKieUnified(
+          'grok-imagine/text-to-image',
+          'Grok Imagine',
+          prompt,
+          parameters,
+          kieKey
+        );
+        break;
+      }
+
+      case 'kie-gpt4o-image': {
+        result = await generateWithKieUnified(
+          'gpt4o/image',
+          'GPT-4O Image',
+          prompt,
+          parameters,
+          kieKey
+        );
+        break;
+      }
+
+      case 'kie-qwen-img2img': {
+        result = await generateWithKieUnified(
+          'qwen/image-to-image',
+          'Qwen Image-to-Image',
+          prompt,
+          parameters,
+          kieKey,
+          processedInputImage
+        );
+        break;
+      }
+
+      case 'kie-nano-banana-edit': {
+        result = await generateWithKieUnified(
+          'google/nano-banana-edit',
+          'Nano Banana Edit',
+          prompt,
+          parameters,
+          kieKey,
+          processedInputImage
+        );
+        break;
+      }
+
+      case 'kie-seedream-v4-edit': {
+        result = await generateWithKieUnified(
+          'bytedance/seedream-v4-edit',
+          'Seedream V4 Edit',
+          prompt,
+          parameters,
+          kieKey,
+          processedInputImage
+        );
+        break;
+      }
+
+      case 'kie-recraft-remove-bg': {
+        result = await generateWithKieUnified(
+          'recraft/remove-background',
+          'Recraft Remove Background',
+          prompt,
+          parameters,
+          kieKey,
+          processedInputImage
+        );
+        break;
+      }
+
+      case 'kie-imagen4-edit': {
+        result = await generateWithKieUnified(
+          'google/imagen4-edit',
+          'Imagen 4 Edit',
+          prompt,
+          parameters,
+          kieKey,
+          processedInputImage
+        );
         break;
       }
 
       default:
         return new Response(
-          JSON.stringify({ error: `Unsupported provider: ${provider}` }),
+          JSON.stringify({ error: `Unsupported provider: ${provider}. Only KIE.AI providers are supported.` }),
           { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         );
     }
@@ -577,14 +944,27 @@ serve(async (req) => {
     );
 
   } catch (error) {
+    console.error('=== EDGE FUNCTION ERROR ===');
     console.error('Unexpected error:', error);
+    console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
+    console.error('Error type:', typeof error);
+    console.error('Error constructor:', error.constructor?.name);
+    console.error('==========================');
+
+    // Create a detailed error response
+    const errorResponse = {
+      error: error.message || 'Internal server error',
+      details: error.message,
+      stack: error.stack,
+      type: error.constructor?.name || 'Unknown',
+      timestamp: new Date().toISOString(),
+    };
+
+    console.error('Returning error response:', JSON.stringify(errorResponse, null, 2));
+
     return new Response(
-      JSON.stringify({
-        error: error.message || 'Internal server error',
-        details: error.message,
-        stack: error.stack,
-      }),
+      JSON.stringify(errorResponse),
       { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }

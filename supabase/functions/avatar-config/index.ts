@@ -72,10 +72,10 @@ serve(async (req) => {
 
     const userId = keyData.user_id
 
-    // Get avatar data
+    // Get avatar data including fine-tuning fields
     const { data: avatar, error: avatarError } = await supabase
       .from('avatars')
-      .select('*')
+      .select('*, active_fine_tuned_model, use_fine_tuned_model, base_model')
       .eq('id', avatar_id)
       .eq('user_id', userId)
       .single()
@@ -292,7 +292,9 @@ serve(async (req) => {
           personality_traits: avatar.personality_traits,
           mbti_type: avatar.mbti_type,
           hidden_rules: avatar.hidden_rules,
-          fine_tuned_model_id: avatar.fine_tuned_model_id
+          fine_tuned_model_id: avatar.active_fine_tuned_model,
+          use_fine_tuned_model: avatar.use_fine_tuned_model,
+          base_model: avatar.base_model
         },
         active_prompt: activePrompt ? {
           version_number: activePrompt.version_number,

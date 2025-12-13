@@ -1,6 +1,20 @@
 import { supabase } from '@/integrations/supabase/client';
 
-export type AIProvider = 'openai' | 'stability' | 'replicate' | 'kie-ai' | 'google';
+export type AIProvider =
+  // KIE.AI text-to-image services
+  | 'kie-nano-banana'
+  | 'kie-qwen-text2img'
+  | 'kie-imagen4-ultra'
+  | 'kie-imagen4'
+  | 'kie-imagen4-fast'
+  | 'kie-grok-imagine'
+  | 'kie-gpt4o-image'
+  // KIE.AI image-to-image services
+  | 'kie-nano-banana-edit'
+  | 'kie-qwen-img2img'
+  | 'kie-seedream-v4-edit'
+  | 'kie-recraft-remove-bg'
+  | 'kie-imagen4-edit';
 
 export interface GenerateImageParams {
   prompt: string;
@@ -50,44 +64,84 @@ export async function generateImage(params: GenerateImageParams): Promise<{ task
     throw new Error('Not authenticated');
   }
 
-  // Removed verbose logging
+  console.log('=== GENERATING IMAGE ===');
+  console.log('Provider:', params.provider);
+  console.log('Prompt:', params.prompt);
+  console.log('Has input images:', !!params.inputImages?.length);
+  console.log('========================');
 
-  const { data, error } = await supabase.functions.invoke('generate-image-unified', {
-    body: {
-      prompt: params.prompt,
-      provider: params.provider || 'openai',
-      inputImage: params.inputImage, // Base64 image for img2img (deprecated)
-      inputImages: params.inputImages, // Multiple Base64 images for img2img combination
-      parameters: {
-        negative_prompt: params.negativePrompt,
-        width: params.width || 1024,
-        height: params.height || 1024,
-        num_images: params.numImages || 1,
-        guidance_scale: params.guidanceScale || 7,
-        style: params.style,
-        strength: params.strength || 0.8,
-      },
+  const requestBody = {
+    prompt: params.prompt,
+    provider: params.provider || 'openai',
+    inputImage: params.inputImage, // Base64 image for img2img (deprecated)
+    inputImages: params.inputImages, // Multiple Base64 images for img2img combination
+    parameters: {
+      negative_prompt: params.negativePrompt,
+      width: params.width || 1024,
+      height: params.height || 1024,
+      num_images: params.numImages || 1,
+      guidance_scale: params.guidanceScale || 7,
+      style: params.style,
+      strength: params.strength || 0.8,
     },
-  });
-
-  if (error) {
-    throw new Error(error.message || 'Failed to generate image');
-  }
-
-  if (data?.error) {
-    throw new Error(`${data.error}${data.details ? ': ' + data.details : ''}`);
-  }
-
-  return {
-    taskId: data.taskId,
-    provider: data.provider,
   };
+
+  // Use direct fetch to get better error messages
+  try {
+    const response = await fetch(
+      `${supabase.supabaseUrl}/functions/v1/generate-image-unified`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.data.session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      }
+    );
+
+    if (!response.ok) {
+      // Try to get error details from response body
+      let errorMessage = `Edge function error (${response.status})`;
+      try {
+        const errorData = await response.json();
+        console.error('Edge function error response:', errorData);
+        if (errorData.error) {
+          errorMessage = errorData.error;
+          if (errorData.details) {
+            errorMessage += ': ' + errorData.details;
+          }
+        }
+      } catch (e) {
+        const errorText = await response.text();
+        console.error('Edge function error text:', errorText);
+        errorMessage = errorText || errorMessage;
+      }
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    console.log('Edge function response:', data);
+
+    if (data?.error) {
+      console.error('Edge function returned error in data:', data);
+      throw new Error(`${data.error}${data.details ? ': ' + data.details : ''}`);
+    }
+
+    return {
+      taskId: data.taskId,
+      provider: data.provider,
+    };
+  } catch (error: any) {
+    console.error('Edge function error:', error);
+    throw error;
+  }
 }
 
 /**
  * Check generation progress for async providers
  */
-export async function checkGenerationProgress(taskId: string): Promise<GenerationProgress> {
+export async function checkGenerationProgress(taskId: string, provider: string): Promise<GenerationProgress> {
   const session = await supabase.auth.getSession();
   if (!session.data.session) {
     throw new Error('Not authenticated');
@@ -97,10 +151,12 @@ export async function checkGenerationProgress(taskId: string): Promise<Generatio
     body: {
       checkProgress: true,
       taskId,
+      provider, // Pass provider so edge function knows which KIE endpoint to check
     },
   });
 
   if (error) {
+    console.error('Progress check error:', error);
     throw new Error(error.message || 'Failed to check progress');
   }
 
@@ -117,12 +173,13 @@ export async function checkGenerationProgress(taskId: string): Promise<Generatio
  */
 export async function pollForCompletion(
   taskId: string,
+  provider: string,
   onProgress?: (progress: number) => void,
   maxAttempts: number = 60,
   interval: number = 2000
 ): Promise<string> {
   for (let i = 0; i < maxAttempts; i++) {
-    const progress = await checkGenerationProgress(taskId);
+    const progress = await checkGenerationProgress(taskId, provider);
 
     if (onProgress) {
       onProgress(progress.progress);
@@ -151,15 +208,16 @@ export async function saveGeneratedImage(
   provider: string,
   model?: string,
   parameters?: any,
-  originalImageUrls?: string[]
+  originalImageUrls?: string[],
+  generationType?: 'text2img' | 'img2img' | 'inpaint'
 ): Promise<GeneratedImage> {
   const session = await supabase.auth.getSession();
   if (!session.data.session) {
     throw new Error('Not authenticated');
   }
 
-  // Determine generation type based on whether there are original images
-  const generationType = originalImageUrls && originalImageUrls.length > 0 ? 'img2img' : 'text2img';
+  // Use provided generation type or determine from original images
+  const finalGenerationType = generationType || (originalImageUrls && originalImageUrls.length > 0 ? 'img2img' : 'text2img');
 
   const { data, error } = await supabase
     .from('generated_images')
@@ -170,11 +228,15 @@ export async function saveGeneratedImage(
       image_url: imageUrl,
       original_image_url: originalImageUrls && originalImageUrls.length > 0 ? originalImageUrls[0] : null,
       provider,
-      model,
+      model: model || parameters?.model || null,
+      model_used: model || parameters?.model || null,
       parameters,
-      generation_type: generationType,
+      generation_type: finalGenerationType,
       width: parameters?.width || 1024,
       height: parameters?.height || 1024,
+      seed: parameters?.seed || null,
+      steps: parameters?.steps || parameters?.num_inference_steps || null,
+      cfg_scale: parameters?.guidance_scale || parameters?.cfg_scale || null,
     })
     .select()
     .single();

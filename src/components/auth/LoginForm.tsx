@@ -1,5 +1,6 @@
 
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -8,6 +9,7 @@ import { Separator } from '@/components/ui/separator';
 import { Mail, Lock, Chrome } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
 
 interface LoginFormProps {
   onSwitchToSignup: () => void;
@@ -26,14 +28,15 @@ const LoginForm = ({
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const { signIn } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      const { error } = await signIn(email, password);
-      
+      const { data, error } = await signIn(email, password);
+
       if (error) {
         toast({
           title: "Login Failed",
@@ -45,6 +48,27 @@ const LoginForm = ({
           title: "Welcome back!",
           description: "Successfully signed in to your account."
         });
+
+        // Check if user is admin and has a default dashboard preference
+        if (data?.user) {
+          const { data: adminData } = await supabase
+            .from('admin_users')
+            .select('default_dashboard, is_active')
+            .eq('user_id', data.user.id)
+            .eq('is_active', true)
+            .single();
+
+          if (adminData && adminData.default_dashboard === 'admin') {
+            // Redirect to admin panel if preference is set
+            navigate('/admin');
+          } else {
+            // Default to user dashboard
+            navigate('/dashboard');
+          }
+        } else {
+          navigate('/dashboard');
+        }
+
         onLoginSuccess();
       }
     } catch (error) {

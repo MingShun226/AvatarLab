@@ -40,13 +40,35 @@ import {
   useRefreshImages
 } from '@/hooks/useGalleryImages';
 import { migrateImagesToStorage } from '@/services/migrationService';
+import { KIE_IMAGE_SERVICES, KIE_IMG2IMG_SERVICES } from '@/config/kieAIConfig';
 
-const PROVIDERS = [
-  { value: 'google', label: 'Google Gemini (Nano Banana 🍌)', icon: Sparkles, description: 'Best for img2img, character consistency, fast & affordable', supportsImg2img: true },
-  { value: 'openai', label: 'OpenAI DALL-E 3', icon: Sparkles, description: 'Highest quality, text-to-image only', supportsImg2img: false },
-  { value: 'stability', label: 'Stability AI', icon: Palette, description: 'Great for artistic styles, supports img2img', supportsImg2img: true },
-  { value: 'kie-ai', label: 'KIE AI Flux', icon: Zap, description: 'Fast generation, text-to-image only', supportsImg2img: false },
-];
+// Aspect ratio presets - optimized for KIE models
+const ASPECT_RATIO_PRESETS: Record<string, { width: number; height: number; label: string }> = {
+  '1:1': { width: 1024, height: 1024, label: '1:1 Square (1024×1024)' },
+  '16:9': { width: 1024, height: 576, label: '16:9 Landscape (1024×576)' },
+  '9:16': { width: 576, height: 1024, label: '9:16 Portrait (576×1024)' },
+  '4:3': { width: 1024, height: 768, label: '4:3 Standard (1024×768)' },
+  '3:4': { width: 768, height: 1024, label: '3:4 Portrait (768×1024)' },
+  '3:2': { width: 1152, height: 768, label: '3:2 Photo (1152×768)' },
+  '2:3': { width: 768, height: 1152, label: '2:3 Tall (768×1152)' },
+  '5:4': { width: 1280, height: 1024, label: '5:4 Classic (1280×1024)' },
+  '4:5': { width: 1024, height: 1280, label: '4:5 Story (1024×1280)' },
+  '21:9': { width: 2560, height: 1080, label: '21:9 Ultrawide (2560×1080)' },
+};
+
+// Build providers list dynamically based on mode
+const getProvidersForMode = (mode: 'text2img' | 'img2img') => {
+  const services = mode === 'text2img' ? KIE_IMAGE_SERVICES : KIE_IMG2IMG_SERVICES;
+  return services.map(service => ({
+    value: service.id,
+    label: service.name,
+    icon: Zap,
+    description: `${service.description} (~$${service.costInUSD})`,
+    supportsImg2img: service.supportsImg2Img || false,
+    supportedAspectRatios: service.supportedAspectRatios || ['1:1'],
+    kieService: true,
+  }));
+};
 
 const ImagesSection = () => {
   const { user } = useAuth();
@@ -56,14 +78,16 @@ const ImagesSection = () => {
   const [generationMode, setGenerationMode] = useState<'text2img' | 'img2img'>('text2img');
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
-  const [provider, setProvider] = useState<AIProvider>('google');
+  const [provider, setProvider] = useState<AIProvider>('kie-nano-banana');
   const [inputImages, setInputImages] = useState<string[]>([]);
   const [strength, setStrength] = useState(0.8);
+  const [width, setWidth] = useState(1024);
+  const [height, setHeight] = useState(1024);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
   const [currentTaskId, setCurrentTaskId] = useState<string | null>(null);
   const [isMigrating, setIsMigrating] = useState(false);
-  const [previewImage, setPreviewImage] = useState<{ url: string; prompt: string; provider: string; parameters?: any; originalImageUrls?: string[] } | null>(null);
+  const [previewImage, setPreviewImage] = useState<{ url: string; prompt: string; provider: string; parameters?: any; originalImageUrls?: string[]; generationType?: 'text2img' | 'img2img' } | null>(null);
   const [selectedImageDetail, setSelectedImageDetail] = useState<GeneratedImage | null>(null);
   const [isSavingPreview, setIsSavingPreview] = useState(false);
 
@@ -73,24 +97,53 @@ const ImagesSection = () => {
   const toggleFavoriteMutation = useToggleFavorite();
   const { refresh: refreshImages } = useRefreshImages();
 
-  // Auto-switch to compatible provider when switching to img2img
+  // Get current providers list
+  const PROVIDERS = getProvidersForMode(generationMode);
+
+  // Get supported aspect ratios for current provider
+  const getSupportedAspectRatios = () => {
+    const currentProvider = PROVIDERS.find(p => p.value === provider);
+    return currentProvider?.supportedAspectRatios || ['1:1'];
+  };
+
+  // Reset to valid aspect ratio when provider changes
   useEffect(() => {
-    if (generationMode === 'img2img') {
-      const currentProvider = PROVIDERS.find(p => p.value === provider);
-      if (currentProvider && !currentProvider.supportsImg2img) {
-        // Switch to Google (Nano Banana) as default for img2img
-        const img2imgProvider = PROVIDERS.find(p => p.supportsImg2img);
-        if (img2imgProvider) {
-          setProvider(img2imgProvider.value as AIProvider);
-          toast({
-            title: "Provider switched",
-            description: `Switched to ${img2imgProvider.label} (supports img2img)`,
-          });
-        }
+    const supportedRatios = getSupportedAspectRatios();
+
+    // Calculate current aspect ratio
+    const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+    const divisor = gcd(width, height);
+    const currentRatio = `${width / divisor}:${height / divisor}`;
+
+    // If current ratio is not supported, reset to first supported ratio
+    if (!supportedRatios.includes(currentRatio)) {
+      const firstSupportedRatio = supportedRatios[0];
+      const preset = ASPECT_RATIO_PRESETS[firstSupportedRatio];
+      if (preset) {
+        setWidth(preset.width);
+        setHeight(preset.height);
       }
-      // Clear input images when switching back to text2img
-    } else if (generationMode === 'text2img') {
-      if (inputImages.length > 0) setInputImages([]);
+    }
+  }, [provider]);
+
+  // Auto-switch provider when switching modes
+  useEffect(() => {
+    const currentProviders = getProvidersForMode(generationMode);
+    const isCurrentProviderValid = currentProviders.some(p => p.value === provider);
+
+    if (!isCurrentProviderValid && currentProviders.length > 0) {
+      // Current provider not valid for this mode, switch to first available
+      const firstProvider = currentProviders[0];
+      setProvider(firstProvider.value as AIProvider);
+      toast({
+        title: "Provider switched",
+        description: `Switched to ${firstProvider.label} for ${generationMode === 'img2img' ? 'image editing' : 'text generation'}`,
+      });
+    }
+
+    // Clear input images when switching back to text2img
+    if (generationMode === 'text2img' && inputImages.length > 0) {
+      setInputImages([]);
     }
   }, [generationMode]);
 
@@ -133,13 +186,18 @@ const ImagesSection = () => {
         negativePrompt: negativePrompt || undefined,
         inputImages: generationMode === 'img2img' && inputImages.length > 0 ? inputImages : undefined,
         strength: generationMode === 'img2img' ? strength : undefined,
+        width,
+        height,
       });
 
       const { taskId, provider: usedProvider } = response;
       setCurrentTaskId(taskId);
 
-      // For async providers (kie-ai), poll for completion
-      if (usedProvider === 'kie-ai' && taskId) {
+      // Check if this is a KIE.AI service (all start with 'kie-')
+      const isKieService = usedProvider.startsWith('kie-');
+
+      // For async providers (KIE.AI services), poll for completion
+      if (isKieService && taskId) {
         let imageUrl: string | null = null;
         let attempts = 0;
         const maxAttempts = 60;
@@ -147,7 +205,7 @@ const ImagesSection = () => {
         while (attempts < maxAttempts && !imageUrl) {
           await new Promise(resolve => setTimeout(resolve, 2000));
 
-          const progress = await checkGenerationProgress(taskId);
+          const progress = await checkGenerationProgress(taskId, usedProvider);
           setGenerationProgress(progress.progress);
 
           if (progress.status === 'completed' && progress.imageUrl) {
@@ -171,8 +229,9 @@ const ImagesSection = () => {
           url: imageUrl,
           prompt,
           provider: usedProvider,
-          parameters: { negative_prompt: negativePrompt },
-          originalImageUrls: generationMode === 'img2img' && inputImages.length > 0 ? inputImages : undefined
+          parameters: { negative_prompt: negativePrompt, width, height },
+          originalImageUrls: generationMode === 'img2img' && inputImages.length > 0 ? inputImages : undefined,
+          generationType: generationMode
         });
 
         toast({
@@ -190,8 +249,9 @@ const ImagesSection = () => {
           url: imageUrl,
           prompt,
           provider: usedProvider,
-          parameters: { negative_prompt: negativePrompt },
-          originalImageUrls: originalImageUrls
+          parameters: { negative_prompt: negativePrompt, width, height },
+          originalImageUrls: originalImageUrls,
+          generationType: generationMode
         });
 
         toast({
@@ -321,7 +381,8 @@ const ImagesSection = () => {
         previewImage.provider,
         undefined,
         previewImage.parameters,
-        previewImage.originalImageUrls
+        previewImage.originalImageUrls,
+        previewImage.generationType
       );
 
       toast({
@@ -493,6 +554,40 @@ const ImagesSection = () => {
                     {selectedProvider.description}
                   </p>
                 )}
+              </div>
+
+              {/* Image Size Selection */}
+              <div className="space-y-2">
+                <Label htmlFor="aspect-ratio">Aspect Ratio</Label>
+                <Select
+                  value={`${width}x${height}`}
+                  onValueChange={(value) => {
+                    const [w, h] = value.split('x').map(Number);
+                    setWidth(w);
+                    setHeight(h);
+                  }}
+                >
+                  <SelectTrigger id="aspect-ratio">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {getSupportedAspectRatios().map((ratio) => {
+                      const preset = ASPECT_RATIO_PRESETS[ratio];
+                      if (!preset) return null;
+                      return (
+                        <SelectItem
+                          key={ratio}
+                          value={`${preset.width}x${preset.height}`}
+                        >
+                          {preset.label}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {getSupportedAspectRatios().length} aspect ratio{getSupportedAspectRatios().length > 1 ? 's' : ''} supported by this model
+                </p>
               </div>
 
               {/* Image Upload for img2img */}

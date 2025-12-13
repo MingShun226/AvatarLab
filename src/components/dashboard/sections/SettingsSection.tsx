@@ -168,7 +168,7 @@ const SettingsSection = () => {
                 Add New API Key
               </CardTitle>
               <CardDescription>
-                Configure API keys for model training and avatar generation
+                Configure API keys for AI services. Add your KIE.AI key for image/video/music generation. Add your HeyGen key for video translation and avatar videos with AI presenters.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -191,13 +191,14 @@ const SettingsSection = () => {
                       <SelectValue placeholder="Select a service..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="OpenAI">OpenAI (DALL-E, GPT, etc.)</SelectItem>
-                      <SelectItem value="Stability">Stability AI (Image Generation)</SelectItem>
-                      <SelectItem value="KIE-AI">KIE AI (Flux Models)</SelectItem>
+                      <SelectItem value="openai">OpenAI (DALL-E, GPT, etc.)</SelectItem>
+                      <SelectItem value="stability">Stability AI (Image Generation)</SelectItem>
+                      <SelectItem value="kie-ai">KIE.AI (Images, Videos, Music)</SelectItem>
+                      <SelectItem value="heygen">HeyGen (Video Translation, Avatar Videos)</SelectItem>
                       <SelectItem value="elevenlabs">ElevenLabs (Voice)</SelectItem>
-                      <SelectItem value="Replicate">Replicate (Various Models)</SelectItem>
-                      <SelectItem value="Anthropic">Anthropic (Claude)</SelectItem>
-                      <SelectItem value="Google">Google (Gemini)</SelectItem>
+                      <SelectItem value="replicate">Replicate (Various Models)</SelectItem>
+                      <SelectItem value="anthropic">Anthropic (Claude)</SelectItem>
+                      <SelectItem value="google">Google (Gemini)</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
