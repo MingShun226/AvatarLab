@@ -11,7 +11,16 @@ export const useAuth = () => {
   useEffect(() => {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
+        // Handle token refresh errors
+        if (event === 'TOKEN_REFRESHED') {
+          console.log('[Auth] Token refreshed successfully');
+        }
+
+        if (event === 'SIGNED_OUT') {
+          console.log('[Auth] User signed out');
+        }
+
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
@@ -19,9 +28,27 @@ export const useAuth = () => {
     );
 
     // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.warn('[Auth] Session error, clearing invalid tokens:', error.message);
+        // Clear invalid tokens
+        const keys = Object.keys(localStorage);
+        keys.forEach(key => {
+          if (key.startsWith('sb-') && key.includes('-auth-token')) {
+            localStorage.removeItem(key);
+          }
+        });
+        setSession(null);
+        setUser(null);
+      } else {
+        setSession(session);
+        setUser(session?.user ?? null);
+      }
+      setLoading(false);
+    }).catch((err) => {
+      console.warn('[Auth] Failed to get session:', err);
+      setSession(null);
+      setUser(null);
       setLoading(false);
     });
 
