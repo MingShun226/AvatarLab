@@ -473,10 +473,10 @@ const ImagesSection = () => {
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <Wand2 className="h-8 w-8" />
-          AI Images Studio
+          Product Images
         </h1>
         <p className="text-muted-foreground mt-2">
-          Generate stunning images with AI - powered by multiple providers
+          Generate professional product photos and advertising visuals for your business
         </p>
       </div>
 

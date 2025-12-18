@@ -185,10 +185,10 @@ const VideosSection = () => {
       <div>
         <h1 className="text-3xl font-bold flex items-center gap-2">
           <Film className="h-8 w-8" />
-          AI Video Studio
+          Promotional Videos
         </h1>
         <p className="text-muted-foreground mt-2">
-          Generate stunning videos with AI - powered by KIE.AI
+          Create engaging promotional videos for social media and advertising campaigns
         </p>
       </div>
 
