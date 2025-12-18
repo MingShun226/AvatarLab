@@ -56,14 +56,16 @@ const TemplateLibrary = ({ type, onSelectTemplate }: TemplateLibraryProps) => {
 
       {/* Category Filter */}
       <Tabs value={selectedCategory} onValueChange={(value) => setSelectedCategory(value as TemplateCategory | 'all')} className="w-full">
-        <TabsList className="grid grid-cols-4 lg:grid-cols-7 w-full">
-          <TabsTrigger value="all" className="text-xs">All</TabsTrigger>
-          {categories.map(cat => (
-            <TabsTrigger key={cat} value={cat} className="text-xs">
-              {getCategoryLabel(cat).split(' ')[0]}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+        <div className="relative">
+          <TabsList className="inline-flex h-auto w-full justify-start overflow-x-auto overflow-y-hidden rounded-md bg-muted p-1 text-muted-foreground scrollbar-hide">
+            <TabsTrigger value="all" className="text-xs whitespace-nowrap">All</TabsTrigger>
+            {categories.map(cat => (
+              <TabsTrigger key={cat} value={cat} className="text-xs whitespace-nowrap">
+                {getCategoryLabel(cat)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
       </Tabs>
 
       {/* Templates Grid */}
