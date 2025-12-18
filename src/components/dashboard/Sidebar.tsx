@@ -18,7 +18,11 @@ import {
   CreditCard,
   Key,
   ShieldCheck,
-  ArrowRightLeft
+  ArrowRightLeft,
+  ChevronDown,
+  ChevronRight,
+  Image,
+  Film
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -30,7 +34,15 @@ interface SidebarProps {
 const navigationItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
   { id: 'chatbot', label: 'WhatsApp Chatbot', icon: MessageCircle, path: '/chatbot-studio' },
-  { id: 'ap-content', label: 'A&P Content Studio', icon: Sparkles, path: '/ap-content-studio' },
+  {
+    id: 'advertising',
+    label: 'Advertising',
+    icon: Sparkles,
+    children: [
+      { id: 'images', label: 'Product Images', icon: Image, path: '/images-studio' },
+      { id: 'videos', label: 'Promo Videos', icon: Film, path: '/video-studio' },
+    ]
+  },
   { id: 'my-avatar', label: 'My Chatbots', icon: UserCircle, path: '/my-avatars' },
   { id: 'api-keys', label: 'API Keys', icon: Key, path: '/api-keys' },
   { id: 'billing', label: 'Billing & Plans', icon: CreditCard, path: '/billing' },
@@ -39,6 +51,7 @@ const navigationItems = [
 const Sidebar = ({ activeSection, onSectionChange, onLogout }: SidebarProps) => {
   const { isCollapsed, setIsCollapsed } = useSidebar();
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [expandedSections, setExpandedSections] = useState<string[]>(['advertising']);
   const { isAdmin } = useAdminAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -51,13 +64,21 @@ const Sidebar = ({ activeSection, onSectionChange, onLogout }: SidebarProps) => 
     setIsMobileOpen(!isMobileOpen);
   };
 
+  const toggleSection = (sectionId: string) => {
+    setExpandedSections(prev =>
+      prev.includes(sectionId)
+        ? prev.filter(id => id !== sectionId)
+        : [...prev, sectionId]
+    );
+  };
+
   const handleNavigation = (item: any) => {
     setIsMobileOpen(false);
 
     if (item.path === '/dashboard') {
       // For dashboard, use the old method
       onSectionChange(item.id);
-    } else {
+    } else if (item.path) {
       // For all other pages, navigate using React Router
       navigate(item.path);
     }
@@ -134,38 +155,84 @@ const Sidebar = ({ activeSection, onSectionChange, onLogout }: SidebarProps) => 
           }}
         >
           <div className="space-y-1">
-            {navigationItems.map((item) => {
+            {navigationItems.map((item: any) => {
               const Icon = item.icon;
-              const isActive = item.path === '/dashboard'
-                ? activeSection === item.id
-                : location.pathname === item.path;
-              
+              const hasChildren = item.children && item.children.length > 0;
+              const isExpanded = expandedSections.includes(item.id);
+
+              // For items with children, check if any child is active
+              const isActive = hasChildren
+                ? item.children.some((child: any) => location.pathname === child.path)
+                : item.path === '/dashboard'
+                  ? activeSection === item.id
+                  : location.pathname === item.path;
+
               return (
-                <button
-                  key={item.id}
-                  onClick={(e) => {
-                    e.stopPropagation(); // Prevent sidebar toggle
-                    handleNavigation(item);
-                  }}
-                  className={`
-                    nav-item w-full text-sm relative group
-                    ${isActive ? 'nav-item-active' : ''}
-                    ${isCollapsed ? 'justify-center px-2' : ''}
-                  `}
-                  title={isCollapsed ? item.label : undefined}
-                >
-                  <Icon className="w-4 h-4 flex-shrink-0" />
-                  {!isCollapsed && <span className="truncate">{item.label}</span>}
-                  
-                  {/* Tooltip for collapsed state */}
-                  {isCollapsed && (
-                    <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded 
-                                  opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none 
-                                  whitespace-nowrap z-50 hidden md:block">
-                      {item.label}
+                <div key={item.id}>
+                  {/* Parent Item */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (hasChildren) {
+                        toggleSection(item.id);
+                      } else {
+                        handleNavigation(item);
+                      }
+                    }}
+                    className={`
+                      nav-item w-full text-sm relative group
+                      ${isActive ? 'nav-item-active' : ''}
+                      ${isCollapsed ? 'justify-center px-2' : ''}
+                    `}
+                    title={isCollapsed ? item.label : undefined}
+                  >
+                    <Icon className="w-4 h-4 flex-shrink-0" />
+                    {!isCollapsed && (
+                      <>
+                        <span className="truncate flex-1 text-left">{item.label}</span>
+                        {hasChildren && (
+                          isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />
+                        )}
+                      </>
+                    )}
+
+                    {/* Tooltip for collapsed state */}
+                    {isCollapsed && (
+                      <div className="absolute left-full ml-2 px-2 py-1 bg-gray-900 text-white text-xs rounded
+                                    opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none
+                                    whitespace-nowrap z-50 hidden md:block">
+                        {item.label}
+                      </div>
+                    )}
+                  </button>
+
+                  {/* Child Items */}
+                  {hasChildren && isExpanded && !isCollapsed && (
+                    <div className="ml-4 mt-1 space-y-1">
+                      {item.children.map((child: any) => {
+                        const ChildIcon = child.icon;
+                        const isChildActive = location.pathname === child.path;
+
+                        return (
+                          <button
+                            key={child.id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleNavigation(child);
+                            }}
+                            className={`
+                              nav-item w-full text-sm relative group
+                              ${isChildActive ? 'nav-item-active' : ''}
+                            `}
+                          >
+                            <ChildIcon className="w-4 h-4 flex-shrink-0" />
+                            <span className="truncate">{child.label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>

@@ -21,6 +21,7 @@ import {
   ExternalLink,
   Settings,
   Languages,
+  Layers
 } from 'lucide-react';
 import { MultiImageUploadBox } from '@/components/ui/multi-image-upload-box';
 import { useToast } from '@/hooks/use-toast';
@@ -28,6 +29,8 @@ import { useAuth } from '@/hooks/useAuth';
 import { KIE_VIDEO_SERVICES } from '@/config/kieAIConfig';
 import { generateVideo, VideoProvider } from '@/services/videoGeneration';
 import VideoGallery from './VideoGallery';
+import TemplateLibrary from '@/components/templates/TemplateLibrary';
+import { VideoTemplate } from '@/config/templates';
 
 // Build video service providers from KIE.AI config
 const VIDEO_SERVICES = KIE_VIDEO_SERVICES.map(service => ({
@@ -111,6 +114,34 @@ const VideosSection = () => {
     }
   }, [generationMode]);
 
+  const handleSelectTemplate = (template: VideoTemplate) => {
+    // Apply template settings to form
+    setGenerationMode(template.generationMode);
+
+    // Set prompt
+    setPrompt(template.prompt);
+
+    // Set aspect ratio
+    setAspectRatio(template.aspectRatio);
+
+    // Set duration
+    setDuration(template.duration);
+
+    // Set provider if specified and valid
+    if (template.defaultProvider && VIDEO_SERVICES.some(s => s.value === template.defaultProvider)) {
+      setSelectedService(template.defaultProvider);
+    }
+
+    toast({
+      title: "Template loaded",
+      description: `${template.name} template applied. Don't forget to replace [PRODUCT] with your product name!`,
+    });
+
+    // Switch to generate tab
+    const generateTab = document.querySelector('[value="generate"]') as HTMLElement;
+    generateTab?.click();
+  };
+
   const handleGenerate = async () => {
     if (!prompt.trim()) {
       toast({
@@ -193,10 +224,19 @@ const VideosSection = () => {
       </div>
 
       <Tabs defaultValue="generate" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
+        <TabsList className="grid w-full grid-cols-3 lg:w-[500px]">
+          <TabsTrigger value="templates" className="gap-1">
+            <Layers className="h-3 w-3" />
+            Templates
+          </TabsTrigger>
           <TabsTrigger value="generate">Generate</TabsTrigger>
           <TabsTrigger value="gallery">Gallery</TabsTrigger>
         </TabsList>
+
+        {/* Templates Tab */}
+        <TabsContent value="templates" className="space-y-6">
+          <TemplateLibrary type="video" onSelectTemplate={handleSelectTemplate} />
+        </TabsContent>
 
         {/* Generate Tab */}
         <TabsContent value="generate" className="space-y-6">

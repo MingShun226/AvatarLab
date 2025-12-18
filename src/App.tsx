@@ -9,7 +9,6 @@ import NotFound from '@/pages/NotFound';
 import AvatarDetail from '@/pages/AvatarDetailNew';
 import MyAvatars from '@/pages/MyAvatars';
 import ChatbotStudio from '@/pages/ChatbotStudio';
-import APContentStudio from '@/pages/APContentStudio';
 import ImagesStudio from '@/pages/ImagesStudio';
 import VideoStudio from '@/pages/VideoStudio';
 import Billing from '@/pages/Billing';
@@ -104,10 +103,6 @@ function App() {
           <Route
             path="/chatbot-studio"
             element={user ? <ChatbotStudio /> : <Navigate to="/auth" />}
-          />
-          <Route
-            path="/ap-content-studio"
-            element={user ? <APContentStudio /> : <Navigate to="/auth" />}
           />
           <Route
             path="/images-studio"

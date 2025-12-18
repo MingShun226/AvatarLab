@@ -18,7 +18,8 @@ import {
   Loader2,
   Wand2,
   Zap,
-  Palette
+  Palette,
+  Layers
 } from 'lucide-react';
 import { MultiImageUploadBox } from '@/components/ui/multi-image-upload-box';
 import { ImagePreviewDialog } from '@/components/ui/image-preview-dialog';
@@ -41,6 +42,8 @@ import {
 } from '@/hooks/useGalleryImages';
 import { migrateImagesToStorage } from '@/services/migrationService';
 import { KIE_IMAGE_SERVICES, KIE_IMG2IMG_SERVICES } from '@/config/kieAIConfig';
+import TemplateLibrary from '@/components/templates/TemplateLibrary';
+import { ImageTemplate } from '@/config/templates';
 
 // Aspect ratio presets - optimized for KIE models
 const ASPECT_RATIO_PRESETS: Record<string, { width: number; height: number; label: string }> = {
@@ -466,6 +469,47 @@ const ImagesSection = () => {
     }
   };
 
+  const handleSelectTemplate = (template: ImageTemplate) => {
+    // Apply template settings to form
+    setGenerationMode(template.generationMode);
+
+    // Set prompt (user will need to replace [PRODUCT] with their product)
+    setPrompt(template.prompt);
+
+    // Set negative prompt if available
+    if (template.negativePrompt) {
+      setNegativePrompt(template.negativePrompt);
+    }
+
+    // Set aspect ratio
+    const [ratioW, ratioH] = template.aspectRatio.split(':').map(Number);
+    const preset = Object.values(ASPECT_RATIO_PRESETS).find(p => {
+      const [w, h] = [p.width, p.height];
+      const gcd = (a: number, b: number): number => b === 0 ? a : gcd(b, a % b);
+      const divisor = gcd(w, h);
+      return `${w / divisor}:${h / divisor}` === template.aspectRatio;
+    });
+
+    if (preset) {
+      setWidth(preset.width);
+      setHeight(preset.height);
+    }
+
+    // Set provider if specified
+    if (template.defaultProvider && PROVIDERS.some(p => p.value === template.defaultProvider)) {
+      setProvider(template.defaultProvider as AIProvider);
+    }
+
+    toast({
+      title: "Template loaded",
+      description: `${template.name} template applied. Don't forget to replace [PRODUCT] with your product name!`,
+    });
+
+    // Switch to generate tab
+    const generateTab = document.querySelector('[value="generate"]') as HTMLElement;
+    generateTab?.click();
+  };
+
   const selectedProvider = PROVIDERS.find(p => p.value === provider);
 
   return (
@@ -481,10 +525,19 @@ const ImagesSection = () => {
       </div>
 
       <Tabs defaultValue="generate" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
+        <TabsList className="grid w-full grid-cols-3 lg:w-[500px]">
+          <TabsTrigger value="templates" className="gap-1">
+            <Layers className="h-3 w-3" />
+            Templates
+          </TabsTrigger>
           <TabsTrigger value="generate">Generate</TabsTrigger>
           <TabsTrigger value="gallery">Gallery ({images.length})</TabsTrigger>
         </TabsList>
+
+        {/* Templates Tab */}
+        <TabsContent value="templates" className="space-y-6">
+          <TemplateLibrary type="image" onSelectTemplate={handleSelectTemplate} />
+        </TabsContent>
 
         {/* Generate Tab */}
         <TabsContent value="generate" className="space-y-6">
