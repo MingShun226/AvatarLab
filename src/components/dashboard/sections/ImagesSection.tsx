@@ -42,6 +42,7 @@ import {
 import { migrateImagesToStorage } from '@/services/migrationService';
 import { KIE_IMAGE_SERVICES, KIE_IMG2IMG_SERVICES } from '@/config/kieAIConfig';
 import { getPopularPlatforms, getAllPlatforms, getStylesByPlatform, PlatformSeries } from '@/config/advertisingStyles';
+import { analyzeProductImage, customizePromptWithProduct, ProductAnalysis } from '@/services/productAnalysis';
 
 // Aspect ratio presets - optimized for KIE models
 const ASPECT_RATIO_PRESETS: Record<string, { width: number; height: number; label: string }> = {
@@ -78,6 +79,10 @@ const ImagesSection = () => {
   // State
   const [inputImages, setInputImages] = useState<string[]>([]);
   const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
+  const [imageSize, setImageSize] = useState<'1K' | '2K' | '4K'>('2K');
+  const [quantityMultiplier, setQuantityMultiplier] = useState<1 | 2 | 3>(1);
+  const [productAnalysis, setProductAnalysis] = useState<ProductAnalysis | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
   const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; styleName: string } | null>(null);
@@ -90,8 +95,45 @@ const ImagesSection = () => {
   const toggleFavoriteMutation = useToggleFavorite();
   const { refresh: refreshImages } = useRefreshImages();
 
-  // Default provider for img2img
-  const DEFAULT_PROVIDER: AIProvider = 'kie-nano-banana';
+  // Default provider for img2img - using nano-banana-pro for better quality
+  const DEFAULT_PROVIDER: AIProvider = 'kie-nano-banana-pro';
+
+  // Size multipliers for different quality settings
+  const getSizeMultiplier = (size: '1K' | '2K' | '4K'): number => {
+    switch (size) {
+      case '1K': return 1.0;
+      case '2K': return 2.0;
+      case '4K': return 4.0;
+    }
+  };
+
+  // Analyze product when image is uploaded
+  useEffect(() => {
+    const analyzeProduct = async () => {
+      if (inputImages.length === 0) {
+        setProductAnalysis(null);
+        return;
+      }
+
+      setIsAnalyzing(true);
+      try {
+        const analysis = await analyzeProductImage(inputImages[0]);
+        setProductAnalysis(analysis);
+        toast({
+          title: "Product analyzed!",
+          description: `Identified: ${analysis.productName || 'Product'}`,
+        });
+      } catch (error) {
+        console.error('Product analysis failed:', error);
+        // Continue with generic analysis
+        setProductAnalysis(null);
+      } finally {
+        setIsAnalyzing(false);
+      }
+    };
+
+    analyzeProduct();
+  }, [inputImages, toast]);
 
   const handleBatchGenerate = async () => {
     // Validate inputs
@@ -113,8 +155,9 @@ const ImagesSection = () => {
       return;
     }
 
-    // Calculate total images (5 images per platform)
-    const totalImages = selectedPlatforms.length * 5;
+    // Calculate total images (5 images per platform × quantity multiplier)
+    const totalImages = selectedPlatforms.length * 5 * quantityMultiplier;
+    const sizeMultiplier = getSizeMultiplier(imageSize);
 
     setIsGenerating(true);
     setBatchProgress({ current: 0, total: totalImages, styleName: '' });
@@ -125,7 +168,7 @@ const ImagesSection = () => {
     try {
       toast({
         title: "Starting series generation...",
-        description: `Generating ${totalImages} images (${selectedPlatforms.length} platform${selectedPlatforms.length > 1 ? 's' : ''} × 5 variations)`,
+        description: `Generating ${totalImages} images (${selectedPlatforms.length} platform${selectedPlatforms.length > 1 ? 's' : ''} × 5 variations × ${quantityMultiplier})`,
       });
 
       // Process each selected platform
@@ -136,26 +179,35 @@ const ImagesSection = () => {
 
         // Generate all 5 styles for this platform
         for (const style of styles) {
-          currentImage++;
-          setBatchProgress({ current: currentImage, total: totalImages, styleName: style.name });
-          setGenerationProgress(0);
+          // Generate multiple copies based on quantity multiplier
+          for (let copy = 1; copy <= quantityMultiplier; copy++) {
+            currentImage++;
+            const copyLabel = quantityMultiplier > 1 ? ` (${copy}/${quantityMultiplier})` : '';
+            setBatchProgress({ current: currentImage, total: totalImages, styleName: style.name + copyLabel });
+            setGenerationProgress(0);
 
-          try {
-            // Get aspect ratio dimensions
-            const preset = ASPECT_RATIO_PRESETS[style.aspectRatio];
-            const width = preset?.width || 1024;
-            const height = preset?.height || 1024;
+            try {
+              // Get aspect ratio dimensions and scale by size
+              const preset = ASPECT_RATIO_PRESETS[style.aspectRatio];
+              const baseWidth = preset?.width || 1024;
+              const baseHeight = preset?.height || 1024;
+              const width = Math.round(baseWidth * sizeMultiplier);
+              const height = Math.round(baseHeight * sizeMultiplier);
 
-            // Start generation with style-specific parameters
-            const response = await generateImage({
-              prompt: style.prompt,
-              provider: DEFAULT_PROVIDER,
-              negativePrompt: style.negativePrompt,
-              inputImages: inputImages,
-              strength: style.strength,
-              width,
-              height,
-            });
+              // Customize prompt with product analysis if available
+              const finalPrompt = productAnalysis
+                ? customizePromptWithProduct(style.prompt, productAnalysis)
+                : style.prompt;
+
+              // Start generation with style-specific parameters
+              const response = await generateImage({
+                prompt: finalPrompt,
+                provider: DEFAULT_PROVIDER,
+                inputImages: inputImages,
+                strength: style.strength,
+                width,
+                height,
+              });
 
             const { taskId, provider: usedProvider } = response;
 
@@ -186,29 +238,35 @@ const ImagesSection = () => {
               throw new Error('Generation timeout');
             }
 
-            // Auto-save to gallery with series info
-            await saveGeneratedImage(
-              imageUrl,
-              `${style.platform} - ${style.seriesNumber}/5: ${style.name}`,
-              usedProvider,
-              undefined,
-              {
-                negative_prompt: style.negativePrompt,
-                width,
-                height,
-                style: style.name,
-                platform: style.platform,
-                seriesNumber: style.seriesNumber
-              },
-              inputImages,
-              'img2img'
-            );
+              // Auto-save to gallery with series info
+              const copyInfo = quantityMultiplier > 1 ? ` [${copy}/${quantityMultiplier}]` : '';
+              await saveGeneratedImage(
+                imageUrl,
+                `${style.platform} - ${style.seriesNumber}/5: ${style.name}${copyInfo}`,
+                usedProvider,
+                undefined,
+                {
+                  width,
+                  height,
+                  size: imageSize,
+                  style: style.name,
+                  platform: style.platform,
+                  seriesNumber: style.seriesNumber,
+                  productAnalysis: productAnalysis ? {
+                    productName: productAnalysis.productName,
+                    category: productAnalysis.category
+                  } : undefined
+                },
+                inputImages,
+                'img2img'
+              );
 
-            generatedCount.success++;
+              generatedCount.success++;
 
-          } catch (error: any) {
-            console.error(`Error generating ${style.name}:`, error);
-            generatedCount.failed++;
+            } catch (error: any) {
+              console.error(`Error generating ${style.name}:`, error);
+              generatedCount.failed++;
+            }
           }
         }
       }
@@ -352,7 +410,7 @@ const ImagesSection = () => {
     setSelectedPlatforms(popularPlatforms.map(p => p.id));
     toast({
       title: "Popular platforms selected",
-      description: `${popularPlatforms.length} platforms selected (${popularPlatforms.length * 5} images total)`,
+      description: `${popularPlatforms.length} platforms selected (${popularPlatforms.length * 5 * quantityMultiplier} images total)`,
     });
   };
 
@@ -387,16 +445,100 @@ const ImagesSection = () => {
                 Upload a simple product photograph - AI will transform it into professional advertising images
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
               <MultiImageUploadBox
                 onImagesChange={(images) => setInputImages(images)}
                 currentImages={inputImages}
                 maxImages={1}
                 maxSizeMB={4}
               />
-              <p className="text-xs text-muted-foreground mt-2">
+              <p className="text-xs text-muted-foreground">
                 Upload a clear product photo. Best results with good lighting and plain background.
               </p>
+
+              {/* Product Analysis Status */}
+              {inputImages.length > 0 && (
+                <div className="p-3 rounded-lg border bg-muted/50">
+                  {isAnalyzing ? (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="text-muted-foreground">Analyzing product...</span>
+                    </div>
+                  ) : productAnalysis ? (
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 text-sm font-medium">
+                        <Sparkles className="h-4 w-4 text-primary" />
+                        <span>Product Identified: {productAnalysis.productName}</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground pl-6">
+                        {productAnalysis.detailedDescription}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-xs text-muted-foreground">
+                      Using generic product analysis
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Size and Quantity Controls */}
+              <div className="grid grid-cols-2 gap-4 pt-2">
+                <div className="space-y-2">
+                  <Label htmlFor="image-size" className="text-sm font-medium">
+                    Image Quality
+                  </Label>
+                  <Select
+                    value={imageSize}
+                    onValueChange={(value: '1K' | '2K' | '4K') => setImageSize(value)}
+                    disabled={isGenerating}
+                  >
+                    <SelectTrigger id="image-size">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1K">
+                        <div className="flex flex-col items-start">
+                          <span>1K - Standard</span>
+                          <span className="text-xs text-muted-foreground">~1024px, faster</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="2K">
+                        <div className="flex flex-col items-start">
+                          <span>2K - High Quality</span>
+                          <span className="text-xs text-muted-foreground">~2048px, balanced</span>
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="4K">
+                        <div className="flex flex-col items-start">
+                          <span>4K - Ultra HD</span>
+                          <span className="text-xs text-muted-foreground">~4096px, premium</span>
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="quantity" className="text-sm font-medium">
+                    Quantity per Style
+                  </Label>
+                  <Select
+                    value={quantityMultiplier.toString()}
+                    onValueChange={(value) => setQuantityMultiplier(parseInt(value) as 1 | 2 | 3)}
+                    disabled={isGenerating}
+                  >
+                    <SelectTrigger id="quantity">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1">1× (5 per platform)</SelectItem>
+                      <SelectItem value="2">2× (10 per platform)</SelectItem>
+                      <SelectItem value="3">3× (15 per platform)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -415,7 +557,7 @@ const ImagesSection = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="secondary" className="gap-1">
-                    {selectedPlatforms.length} platform{selectedPlatforms.length !== 1 ? 's' : ''} ({selectedPlatforms.length * 5} images)
+                    {selectedPlatforms.length} platform{selectedPlatforms.length !== 1 ? 's' : ''} ({selectedPlatforms.length * 5 * quantityMultiplier} images)
                   </Badge>
                   <Button
                     variant="outline"
@@ -531,7 +673,7 @@ const ImagesSection = () => {
             ) : (
               <>
                 <Sparkles className="mr-2 h-6 w-6" />
-                Generate {selectedPlatforms.length * 5} Images ({selectedPlatforms.length} Series)
+                Generate {selectedPlatforms.length * 5 * quantityMultiplier} Images ({selectedPlatforms.length} Series × {quantityMultiplier})
               </>
             )}
           </Button>

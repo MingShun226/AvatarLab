@@ -177,6 +177,26 @@ export const KIE_IMAGE_SERVICES: KIEService[] = [
  */
 export const KIE_IMG2IMG_SERVICES: KIEService[] = [
   {
+    id: 'kie-nano-banana-pro',
+    name: 'Nano Banana Pro',
+    description: 'Premium img2img with 1K/2K/4K support - Best for product advertising',
+    type: 'image',
+    endpoint: '/api/v1/jobs/createTask',
+    costPerGeneration: 18, // $0.09 for 1K/2K
+    costInUSD: 0.09,
+    estimatedTime: 12,
+    features: [
+      'Up to 8 input images',
+      '1K/2K/4K resolution',
+      'Production-grade quality',
+      'Enhanced scaling',
+      'Perfect for advertising',
+      'All aspect ratios'
+    ],
+    supportsImg2Img: true,
+    supportedAspectRatios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'],
+  },
+  {
     id: 'kie-nano-banana-edit',
     name: 'Nano Banana Edit',
     description: 'Natural language image editing with pixel-level accuracy',
