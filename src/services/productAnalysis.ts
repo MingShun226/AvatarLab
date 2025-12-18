@@ -1,7 +1,7 @@
 // Product image analysis service
 // Analyzes uploaded product images to generate accurate descriptions for prompt customization
 
-import { supabase } from '@/config/supabase';
+import { supabase } from '@/integrations/supabase/client';
 
 export interface ProductAnalysis {
   productName: string;
