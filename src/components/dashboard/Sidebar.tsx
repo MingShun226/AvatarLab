@@ -8,8 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import {
   LayoutDashboard,
   MessageCircle,
-  Image,
-  Video,
+  Sparkles,
   Settings,
   LogOut,
   Bot,
@@ -31,8 +30,7 @@ interface SidebarProps {
 const navigationItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
   { id: 'chatbot', label: 'WhatsApp Chatbot', icon: MessageCircle, path: '/chatbot-studio' },
-  { id: 'images', label: 'Product Images', icon: Image, path: '/images-studio' },
-  { id: 'videos', label: 'Promo Videos', icon: Video, path: '/video-studio' },
+  { id: 'ap-content', label: 'A&P Content Studio', icon: Sparkles, path: '/ap-content-studio' },
   { id: 'my-avatar', label: 'My Chatbots', icon: UserCircle, path: '/my-avatars' },
   { id: 'api-keys', label: 'API Keys', icon: Key, path: '/api-keys' },
   { id: 'billing', label: 'Billing & Plans', icon: CreditCard, path: '/billing' },
