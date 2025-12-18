@@ -7,14 +7,10 @@ import Auth from '@/pages/Auth';
 import Dashboard from '@/pages/Dashboard';
 import NotFound from '@/pages/NotFound';
 import AvatarDetail from '@/pages/AvatarDetailNew';
-import Marketplace from '@/pages/Marketplace';
-import TTSStudio from '@/pages/TTSStudio';
 import MyAvatars from '@/pages/MyAvatars';
 import ChatbotStudio from '@/pages/ChatbotStudio';
 import ImagesStudio from '@/pages/ImagesStudio';
 import VideoStudio from '@/pages/VideoStudio';
-import AvatarStudio from '@/pages/AvatarStudio';
-import LearningPath from '@/pages/LearningPath';
 import Billing from '@/pages/Billing';
 import Settings from '@/pages/Settings';
 import { Toaster } from "@/components/ui/toaster"
@@ -101,14 +97,6 @@ function App() {
             element={user ? <AvatarDetail /> : <Navigate to="/auth" />}
           />
           <Route
-            path="/marketplace"
-            element={<Marketplace />}
-          />
-          <Route
-            path="/tts-studio"
-            element={user ? <TTSStudio /> : <Navigate to="/auth" />}
-          />
-          <Route
             path="/my-avatars"
             element={user ? <MyAvatars /> : <Navigate to="/auth" />}
           />
@@ -123,14 +111,6 @@ function App() {
           <Route
             path="/video-studio"
             element={user ? <VideoStudio /> : <Navigate to="/auth" />}
-          />
-          <Route
-            path="/avatar-studio"
-            element={user ? <AvatarStudio /> : <Navigate to="/auth" />}
-          />
-          <Route
-            path="/learning-path"
-            element={user ? <LearningPath /> : <Navigate to="/auth" />}
           />
           <Route
             path="/billing"

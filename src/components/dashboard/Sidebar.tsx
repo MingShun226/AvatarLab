@@ -8,15 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import {
   LayoutDashboard,
   MessageCircle,
-  Mic,
   Image,
   Video,
-  User,
-  GitBranch,
   Settings,
   LogOut,
   Bot,
-  ShoppingBag,
   Menu,
   X,
   UserCircle,
@@ -34,14 +30,10 @@ interface SidebarProps {
 
 const navigationItems = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
-  { id: 'marketplace', label: 'Avatar Marketplace', icon: ShoppingBag, path: '/marketplace' },
-  { id: 'chatbot', label: 'AI Chatbot', icon: MessageCircle, path: '/chatbot-studio' },
-  { id: 'tts', label: 'TTS Voice', icon: Mic, path: '/tts-studio' },
-  { id: 'images', label: 'AI Images', icon: Image, path: '/images-studio' },
-  { id: 'videos', label: 'AI Videos', icon: Video, path: '/video-studio' },
-  { id: 'avatar', label: 'AI Avatar', icon: User, path: '/avatar-studio' },
-  { id: 'learning-path', label: 'Learning Path', icon: GitBranch, path: '/learning-path' },
-  { id: 'my-avatar', label: 'My Avatar', icon: UserCircle, path: '/my-avatars' },
+  { id: 'chatbot', label: 'WhatsApp Chatbot', icon: MessageCircle, path: '/chatbot-studio' },
+  { id: 'images', label: 'Product Images', icon: Image, path: '/images-studio' },
+  { id: 'videos', label: 'Promo Videos', icon: Video, path: '/video-studio' },
+  { id: 'my-avatar', label: 'My Chatbots', icon: UserCircle, path: '/my-avatars' },
   { id: 'api-keys', label: 'API Keys', icon: Key, path: '/api-keys' },
   { id: 'billing', label: 'Billing & Plans', icon: CreditCard, path: '/billing' },
 ];
@@ -127,7 +119,7 @@ const Sidebar = ({ activeSection, onSectionChange, onLogout }: SidebarProps) => 
             {!isCollapsed && (
               <div className="min-w-0 flex-1">
                 <h1 className="text-sm font-bold text-sidebar-foreground truncate">AvatarHub</h1>
-                <p className="text-xs text-sidebar-foreground/60 truncate">Your AI Avatar Station</p>
+                <p className="text-xs text-sidebar-foreground/60 truncate">AI Business Automation</p>
               </div>
             )}
           </div>
