@@ -41,7 +41,7 @@ import {
 } from '@/hooks/useGalleryImages';
 import { migrateImagesToStorage } from '@/services/migrationService';
 import { KIE_IMAGE_SERVICES, KIE_IMG2IMG_SERVICES } from '@/config/kieAIConfig';
-import { ADVERTISING_STYLES, getPopularStyles, getAllPlatforms, getStylesByPlatform, AdvertisingStyle } from '@/config/advertisingStyles';
+import { getPopularPlatforms, getAllPlatforms, getStylesByPlatform, PlatformSeries } from '@/config/advertisingStyles';
 
 // Aspect ratio presets - optimized for KIE models
 const ASPECT_RATIO_PRESETS: Record<string, { width: number; height: number; label: string }> = {
@@ -77,13 +77,12 @@ const ImagesSection = () => {
 
   // State
   const [inputImages, setInputImages] = useState<string[]>([]);
-  const [selectedStyles, setSelectedStyles] = useState<string[]>([]);
+  const [selectedPlatforms, setSelectedPlatforms] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generationProgress, setGenerationProgress] = useState(0);
-  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number } | null>(null);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; styleName: string } | null>(null);
   const [isMigrating, setIsMigrating] = useState(false);
   const [selectedImageDetail, setSelectedImageDetail] = useState<GeneratedImage | null>(null);
-  const [platformFilter, setPlatformFilter] = useState<string>('all');
 
   // React Query hooks
   const { data: images = [], isLoading: isLoadingImages } = useGalleryImages();
@@ -105,110 +104,118 @@ const ImagesSection = () => {
       return;
     }
 
-    if (selectedStyles.length === 0) {
+    if (selectedPlatforms.length === 0) {
       toast({
         title: "Error",
-        description: "Please select at least one advertising style",
+        description: "Please select at least one platform series",
         variant: "destructive",
       });
       return;
     }
 
+    // Calculate total images (5 images per platform)
+    const totalImages = selectedPlatforms.length * 5;
+
     setIsGenerating(true);
-    setBatchProgress({ current: 0, total: selectedStyles.length });
+    setBatchProgress({ current: 0, total: totalImages, styleName: '' });
 
     const generatedCount = { success: 0, failed: 0 };
+    let currentImage = 0;
 
     try {
       toast({
-        title: "Starting batch generation...",
-        description: `Generating ${selectedStyles.length} advertising images`,
+        title: "Starting series generation...",
+        description: `Generating ${totalImages} images (${selectedPlatforms.length} platform${selectedPlatforms.length > 1 ? 's' : ''} × 5 variations)`,
       });
 
-      // Process each selected style
-      for (let i = 0; i < selectedStyles.length; i++) {
-        const styleId = selectedStyles[i];
-        const style = ADVERTISING_STYLES.find(s => s.id === styleId);
+      // Process each selected platform
+      for (const platformId of selectedPlatforms) {
+        const styles = getStylesByPlatform(platformId);
 
-        if (!style) continue;
+        if (styles.length === 0) continue;
 
-        setBatchProgress({ current: i + 1, total: selectedStyles.length });
-        setGenerationProgress(0);
+        // Generate all 5 styles for this platform
+        for (const style of styles) {
+          currentImage++;
+          setBatchProgress({ current: currentImage, total: totalImages, styleName: style.name });
+          setGenerationProgress(0);
 
-        try {
-          // Get aspect ratio dimensions
-          const preset = ASPECT_RATIO_PRESETS[style.aspectRatio];
-          const width = preset?.width || 1024;
-          const height = preset?.height || 1024;
+          try {
+            // Get aspect ratio dimensions
+            const preset = ASPECT_RATIO_PRESETS[style.aspectRatio];
+            const width = preset?.width || 1024;
+            const height = preset?.height || 1024;
 
-          // Start generation with style-specific parameters
-          const response = await generateImage({
-            prompt: style.prompt,
-            provider: DEFAULT_PROVIDER,
-            negativePrompt: style.negativePrompt,
-            inputImages: inputImages,
-            strength: style.strength,
-            width,
-            height,
-          });
-
-          const { taskId, provider: usedProvider } = response;
-
-          // Poll for completion
-          let imageUrl: string | null = null;
-          let attempts = 0;
-          const maxAttempts = 60;
-
-          while (attempts < maxAttempts && !imageUrl) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            const progress = await checkGenerationProgress(taskId, usedProvider);
-            setGenerationProgress(progress.progress);
-
-            if (progress.status === 'completed' && progress.imageUrl) {
-              imageUrl = progress.imageUrl;
-              break;
-            }
-
-            if (progress.status === 'failed') {
-              throw new Error(progress.error || 'Generation failed');
-            }
-
-            attempts++;
-          }
-
-          if (!imageUrl) {
-            throw new Error('Generation timeout');
-          }
-
-          // Auto-save to gallery with style name
-          await saveGeneratedImage(
-            imageUrl,
-            `${style.name} - ${style.platform}`,
-            usedProvider,
-            undefined,
-            {
-              negative_prompt: style.negativePrompt,
+            // Start generation with style-specific parameters
+            const response = await generateImage({
+              prompt: style.prompt,
+              provider: DEFAULT_PROVIDER,
+              negativePrompt: style.negativePrompt,
+              inputImages: inputImages,
+              strength: style.strength,
               width,
               height,
-              style: style.name,
-              platform: style.platform
-            },
-            inputImages,
-            'img2img'
-          );
+            });
 
-          generatedCount.success++;
+            const { taskId, provider: usedProvider } = response;
 
-        } catch (error: any) {
-          console.error(`Error generating ${style.name}:`, error);
-          generatedCount.failed++;
+            // Poll for completion
+            let imageUrl: string | null = null;
+            let attempts = 0;
+            const maxAttempts = 60;
+
+            while (attempts < maxAttempts && !imageUrl) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
+
+              const progress = await checkGenerationProgress(taskId, usedProvider);
+              setGenerationProgress(progress.progress);
+
+              if (progress.status === 'completed' && progress.imageUrl) {
+                imageUrl = progress.imageUrl;
+                break;
+              }
+
+              if (progress.status === 'failed') {
+                throw new Error(progress.error || 'Generation failed');
+              }
+
+              attempts++;
+            }
+
+            if (!imageUrl) {
+              throw new Error('Generation timeout');
+            }
+
+            // Auto-save to gallery with series info
+            await saveGeneratedImage(
+              imageUrl,
+              `${style.platform} - ${style.seriesNumber}/5: ${style.name}`,
+              usedProvider,
+              undefined,
+              {
+                negative_prompt: style.negativePrompt,
+                width,
+                height,
+                style: style.name,
+                platform: style.platform,
+                seriesNumber: style.seriesNumber
+              },
+              inputImages,
+              'img2img'
+            );
+
+            generatedCount.success++;
+
+          } catch (error: any) {
+            console.error(`Error generating ${style.name}:`, error);
+            generatedCount.failed++;
+          }
         }
       }
 
       // Show completion summary
       toast({
-        title: "Batch generation complete!",
+        title: "Series generation complete!",
         description: `Successfully generated ${generatedCount.success} images${generatedCount.failed > 0 ? `, ${generatedCount.failed} failed` : ''}`,
       });
 
@@ -217,7 +224,7 @@ const ImagesSection = () => {
 
       // Reset form
       setInputImages([]);
-      setSelectedStyles([]);
+      setSelectedPlatforms([]);
 
       // Switch to gallery tab
       const galleryTab = document.querySelector('[value="gallery"]') as HTMLElement;
@@ -226,8 +233,8 @@ const ImagesSection = () => {
     } catch (error: any) {
       console.error('Error in batch generation:', error);
       toast({
-        title: "Batch generation failed",
-        description: error.message || "Failed to complete batch generation",
+        title: "Series generation failed",
+        description: error.message || "Failed to complete series generation",
         variant: "destructive",
       });
     } finally {
@@ -330,31 +337,23 @@ const ImagesSection = () => {
     }
   };
 
-  // Toggle style selection
-  const toggleStyle = (styleId: string) => {
-    setSelectedStyles(prev =>
-      prev.includes(styleId)
-        ? prev.filter(id => id !== styleId)
-        : [...prev, styleId]
+  // Toggle platform selection
+  const togglePlatform = (platformId: string) => {
+    setSelectedPlatforms(prev =>
+      prev.includes(platformId)
+        ? prev.filter(id => id !== platformId)
+        : [...prev, platformId]
     );
   };
 
-  // Quick select all popular styles
-  const selectPopularStyles = () => {
-    const popularStyles = getPopularStyles();
-    setSelectedStyles(popularStyles.map(s => s.id));
+  // Quick select all popular platforms
+  const selectPopularPlatforms = () => {
+    const popularPlatforms = getPopularPlatforms();
+    setSelectedPlatforms(popularPlatforms.map(p => p.id));
     toast({
-      title: "Popular styles selected",
-      description: `${popularStyles.length} popular advertising styles selected`,
+      title: "Popular platforms selected",
+      description: `${popularPlatforms.length} platforms selected (${popularPlatforms.length * 5} images total)`,
     });
-  };
-
-  // Get filtered styles
-  const getFilteredStyles = () => {
-    if (platformFilter === 'all') {
-      return ADVERTISING_STYLES;
-    }
-    return getStylesByPlatform(platformFilter);
   };
 
   return (
@@ -401,27 +400,27 @@ const ImagesSection = () => {
             </CardContent>
           </Card>
 
-          {/* Style Selection Section */}
+          {/* Platform Series Selection Section */}
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     <Palette className="h-5 w-5" />
-                    Select Advertising Styles
+                    Select Platform Series
                   </CardTitle>
                   <CardDescription>
-                    Choose one or more styles for your product images
+                    Each platform generates 5 unique advertising images
                   </CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="secondary" className="gap-1">
-                    {selectedStyles.length} selected
+                    {selectedPlatforms.length} platform{selectedPlatforms.length !== 1 ? 's' : ''} ({selectedPlatforms.length * 5} images)
                   </Badge>
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={selectPopularStyles}
+                    onClick={selectPopularPlatforms}
                     disabled={isGenerating}
                   >
                     <Sparkles className="h-3 w-3 mr-1" />
@@ -431,69 +430,52 @@ const ImagesSection = () => {
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Platform Filter */}
-              <div className="flex items-center gap-2 overflow-x-auto pb-2">
-                <Button
-                  variant={platformFilter === 'all' ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setPlatformFilter('all')}
-                  disabled={isGenerating}
-                >
-                  All Platforms
-                </Button>
+              {/* Platform Cards Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {getAllPlatforms().map(platform => (
-                  <Button
-                    key={platform}
-                    variant={platformFilter === platform ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => setPlatformFilter(platform)}
-                    disabled={isGenerating}
-                  >
-                    {platform}
-                  </Button>
-                ))}
-              </div>
-
-              {/* Style Cards Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {getFilteredStyles().map(style => (
                   <Card
-                    key={style.id}
+                    key={platform.id}
                     className={`cursor-pointer transition-all ${
-                      selectedStyles.includes(style.id)
+                      selectedPlatforms.includes(platform.id)
                         ? 'border-primary ring-2 ring-primary'
                         : 'hover:border-primary'
                     }`}
-                    onClick={() => !isGenerating && toggleStyle(style.id)}
+                    onClick={() => !isGenerating && togglePlatform(platform.id)}
                   >
                     <CardHeader className="space-y-2">
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <CardTitle className="text-sm flex items-center gap-2">
-                            {selectedStyles.includes(style.id) && (
-                              <div className="h-4 w-4 rounded-full bg-primary flex items-center justify-center">
+                          <CardTitle className="text-base flex items-center gap-2">
+                            {selectedPlatforms.includes(platform.id) && (
+                              <div className="h-5 w-5 rounded-full bg-primary flex items-center justify-center">
                                 <span className="text-xs text-primary-foreground">✓</span>
                               </div>
                             )}
-                            {style.name}
+                            {platform.name}
                           </CardTitle>
                           <CardDescription className="text-xs mt-1">
-                            {style.description}
+                            {platform.description}
                           </CardDescription>
                         </div>
-                        {style.popular && (
+                        {platform.popular && (
                           <Badge variant="secondary" className="text-xs ml-2">
                             Popular
                           </Badge>
                         )}
                       </div>
                     </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between text-xs">
-                          <Badge variant="outline">{style.platform}</Badge>
-                          <span className="text-muted-foreground">{style.aspectRatio}</span>
-                        </div>
+                    <CardContent className="space-y-2">
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Layers className="h-3 w-3" />
+                        <span>5-image series</span>
+                      </div>
+                      <div className="text-xs space-y-1">
+                        {platform.styles.map((style, idx) => (
+                          <div key={style.id} className="flex items-start gap-2">
+                            <Badge variant="outline" className="text-xs shrink-0">{idx + 1}</Badge>
+                            <span className="text-muted-foreground">{style.name}</span>
+                          </div>
+                        ))}
                       </div>
                     </CardContent>
                   </Card>
@@ -503,29 +485,31 @@ const ImagesSection = () => {
           </Card>
 
           {/* Progress Section */}
-          {isGenerating && (
+          {isGenerating && batchProgress && (
             <Card>
               <CardContent className="pt-6 space-y-4">
-                {batchProgress && (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">
-                        Generating image {batchProgress.current} of {batchProgress.total}
-                      </span>
-                      <span className="font-medium">
-                        {Math.round((batchProgress.current / batchProgress.total) * 100)}%
-                      </span>
-                    </div>
-                    <Progress value={(batchProgress.current / batchProgress.total) * 100} className="h-2" />
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      {batchProgress.styleName && `Now: ${batchProgress.styleName}`}
+                    </span>
+                    <span className="font-medium">
+                      {batchProgress.current} / {batchProgress.total}
+                    </span>
                   </div>
-                )}
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Series Progress</span>
+                    <span>{Math.round((batchProgress.current / batchProgress.total) * 100)}%</span>
+                  </div>
+                  <Progress value={(batchProgress.current / batchProgress.total) * 100} className="h-2" />
+                </div>
                 {generationProgress > 0 && (
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Current image progress...</span>
-                      <span className="font-medium">{Math.round(generationProgress)}%</span>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <span>Current Image</span>
+                      <span>{Math.round(generationProgress)}%</span>
                     </div>
-                    <Progress value={generationProgress} className="h-2" />
+                    <Progress value={generationProgress} className="h-1" />
                   </div>
                 )}
               </CardContent>
@@ -535,7 +519,7 @@ const ImagesSection = () => {
           {/* Generate Button */}
           <Button
             onClick={handleBatchGenerate}
-            disabled={isGenerating || inputImages.length === 0 || selectedStyles.length === 0}
+            disabled={isGenerating || inputImages.length === 0 || selectedPlatforms.length === 0}
             className="w-full h-14 text-lg"
             size="lg"
           >
@@ -547,7 +531,7 @@ const ImagesSection = () => {
             ) : (
               <>
                 <Sparkles className="mr-2 h-6 w-6" />
-                Generate {selectedStyles.length} Advertising Image{selectedStyles.length !== 1 ? 's' : ''}
+                Generate {selectedPlatforms.length * 5} Images ({selectedPlatforms.length} Series)
               </>
             )}
           </Button>
