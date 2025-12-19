@@ -119,12 +119,26 @@ const ImagesSection = () => {
       try {
         const analysis = await analyzeProductImage(inputImages[0]);
         setProductAnalysis(analysis);
-        toast({
-          title: "Product analyzed!",
-          description: `Identified: ${analysis.productName || 'Product'}`,
-        });
-      } catch (error) {
+
+        // Only show success toast if we got a real analysis (not fallback)
+        if (analysis.productName !== 'product') {
+          toast({
+            title: "Product analyzed!",
+            description: `Identified: ${analysis.productName}`,
+          });
+        }
+      } catch (error: any) {
         console.error('Product analysis failed:', error);
+
+        // Show user-friendly message about missing API key
+        if (error?.message?.includes('API key')) {
+          toast({
+            title: "Product analysis unavailable",
+            description: "Add an OpenAI API key in Settings to enable AI product analysis. Using generic prompts for now.",
+            variant: "default",
+          });
+        }
+
         // Continue with generic analysis
         setProductAnalysis(null);
       } finally {
@@ -475,8 +489,13 @@ const ImagesSection = () => {
                       </p>
                     </div>
                   ) : (
-                    <div className="text-xs text-muted-foreground">
-                      Using generic product analysis
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium text-muted-foreground">
+                        Using generic prompts
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Add OpenAI API key in Settings for AI product analysis
+                      </p>
                     </div>
                   )}
                 </div>
