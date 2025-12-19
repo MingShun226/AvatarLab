@@ -130,14 +130,15 @@ const ImagesSection = () => {
       } catch (error: any) {
         console.error('Product analysis failed:', error);
 
-        // Show user-friendly message about missing API key
-        if (error?.message?.includes('API key')) {
-          toast({
-            title: "Product analysis unavailable",
-            description: "Add an OpenAI API key in Settings to enable AI product analysis. Using generic prompts for now.",
-            variant: "default",
-          });
-        }
+        // Show user-friendly message with actual error
+        const errorMessage = error?.message || 'Unknown error';
+        toast({
+          title: "Product analysis failed",
+          description: errorMessage.includes('API key')
+            ? "Add an OpenAI API key in Settings > API Keys to enable AI product analysis. Using generic prompts for now."
+            : `${errorMessage}. Using generic prompts for now.`,
+          variant: "destructive",
+        });
 
         // Continue with generic analysis
         setProductAnalysis(null);

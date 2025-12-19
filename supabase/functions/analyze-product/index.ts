@@ -86,7 +86,19 @@ serve(async (req: Request) => {
       .limit(1)
       .maybeSingle()
 
-    if (keyError || !userKey?.api_key_encrypted) {
+    console.log('API Key Query:', { user_id: user.id, keyError, hasKey: !!userKey?.api_key_encrypted })
+
+    if (keyError) {
+      return new Response(
+        JSON.stringify({ error: `Database error fetching API key: ${keyError.message}` }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        }
+      )
+    }
+
+    if (!userKey?.api_key_encrypted) {
       return new Response(
         JSON.stringify({ error: 'No OpenAI API key found. Please add one in Settings > API Keys.' }),
         {

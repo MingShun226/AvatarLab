@@ -26,7 +26,14 @@ export async function analyzeProductImage(imageDataUrl: string): Promise<Product
       }
     });
 
-    if (error) throw error;
+    if (error) {
+      console.error('Edge function error:', error);
+      throw new Error(data?.error || error.message || 'Failed to analyze product');
+    }
+
+    if (data?.error) {
+      throw new Error(data.error);
+    }
 
     // Check if we got a structured JSON response
     if (data?.analysis && !data.analysis.raw) {
