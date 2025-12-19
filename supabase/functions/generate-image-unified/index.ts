@@ -835,6 +835,18 @@ serve(async (req) => {
         break;
       }
 
+      case 'kie-nano-banana-pro': {
+        result = await generateWithKieUnified(
+          'google/nano-banana-pro',
+          'Nano Banana Pro',
+          prompt,
+          parameters,
+          kieKey,
+          processedInputImage
+        );
+        break;
+      }
+
       case 'kie-seedream-v4-edit': {
         result = await generateWithKieUnified(
           'bytedance/seedream-v4-edit',
