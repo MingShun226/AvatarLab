@@ -80,7 +80,7 @@ serve(async (req: Request) => {
       .from('user_api_keys')
       .select('api_key_encrypted')
       .eq('user_id', user.id)
-      .eq('service', 'OpenAI')
+      .eq('service', 'openai')
       .eq('status', 'active')
       .order('created_at', { ascending: false })
       .limit(1)
