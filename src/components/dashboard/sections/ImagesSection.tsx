@@ -188,9 +188,11 @@ const ImagesSection = () => {
 
       // Process each selected platform
       for (const platformId of selectedPlatforms) {
-        const styles = getStylesByPlatform(platformId);
+        const platform = getAllPlatforms().find(p => p.id === platformId);
 
-        if (styles.length === 0) continue;
+        if (!platform || platform.styles.length === 0) continue;
+
+        const styles = platform.styles;
 
         // Generate all 5 styles for this platform
         for (const style of styles) {
